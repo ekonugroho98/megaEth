@@ -35,9 +35,8 @@ async def start():
 
     print("\nAvailable options:\n")
     print("[1] ⭐️ Start farming")
-    print("[2] 🔧 Edit config")
-    print("[3] 💾 Database actions")
-    print("[4] 👋 Exit")
+    print("[2] 💾 Database actions")
+    print("[3] 👋 Exit")
     print()
 
     try:
@@ -46,14 +45,11 @@ async def start():
         logger.error(f"Input error: {e}")
         return
 
-    if choice == "4" or not choice:
-        return
-    elif choice == "2":
-        run()
+    if choice == "3" or not choice:
         return
     elif choice == "1":
         pass
-    elif choice == "3":
+    elif choice == "2":
         from src.model.database.db_manager import show_database_menu
 
         await show_database_menu()
