@@ -33,7 +33,6 @@ NERZO_MEGAETH = ["nerzo_megaeth"]
 MORKIE_MEGA = ["morkie_mega"]
 NERZO_FLUFFLE = ["nerzo_fluffle"]
 """
-EN:
 You can create your own task with the modules you need 
 and add it to the TASKS list or use our ready-made preset tasks.
 
@@ -43,24 +42,9 @@ in random order
 on random
 SEE THE EXAMPLE BELOW:
 
-RU:
-Вы можете создать свою задачу с модулями, которые вам нужны, 
-и добавить ее в список TASKS, см. пример ниже:
-
-( ) - означает, что все модули внутри скобок будут выполнены в случайном порядке
-[ ] - означает, что будет выполнен только один из модулей внутри скобок в случайном порядке
-СМОТРИТЕ ПРИМЕР НИЖЕ:
-
-CHINESE:
-你可以创建自己的任务，使用你需要的模块，
-并将其添加到TASKS列表中，请参见下面的示例：
-
-( ) - 表示括号内的所有模块将按随机顺序执行
-[ ] - 表示括号内的模块将按随机顺序执行
-
 --------------------------------
 !!! IMPORTANT !!!
-EXAMPLE | ПРИМЕР | 示例:
+EXAMPLE:
 
 TASKS = [
     "CREATE_YOUR_OWN_TASK",
@@ -73,11 +57,7 @@ CREATE_YOUR_OWN_TASK = [
 ]
 --------------------------------
 
-
 BELOW ARE THE READY-MADE TASKS THAT YOU CAN USE:
-СНИЗУ ПРИВЕДЕНЫ ГОТОВЫЕ ПРИМЕРЫ ЗАДАЧ, КОТОРЫЕ ВЫ МОЖЕТЕ ИСПОЛЬЗОВАТЬ:
-以下是您可以使用的现成任务：
-
 
 crusty_refuel - refuel MEGAETH at https://www.crustyswap.com/
 crusty_refuel_from_one_to_all - refuel MEGAETH from one to all wallets at https://www.crustyswap.com/

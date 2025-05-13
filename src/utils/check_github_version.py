@@ -91,14 +91,14 @@ async def compare_versions(
         github_dt = datetime.fromisoformat(github_date.replace("Z", "+00:00"))
         formatted_date = github_dt.strftime("%d.%m.%Y %H:%M UTC")
 
-        # Если хеши совпадают - у нас последняя версия
+        # If hashes match - we have the latest version
         if local_hash == github_hash:
             return (
                 True,
                 f"✅ You have the latest version (commit from {formatted_date})",
             )
 
-        # Если хеши разные - нужно обновление
+        # If hashes are different - update needed
         return (
             False,
             f"⚠️ Update available!\n"
