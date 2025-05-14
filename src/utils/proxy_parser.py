@@ -2,7 +2,7 @@ import re
 import random
 import string
 from pathlib import Path
-from typing import Literal, TypedDict, Union
+from typing import Literal, TypedDict, Union, Optional
 
 from pydantic import BaseModel, Field, field_validator
 from pydantic.networks import HttpUrl, IPv4Address
@@ -40,10 +40,10 @@ PROXY_FORMATS_REGEXP = [
 class ParsedProxy(TypedDict):
     host: str
     port: int
-    protocol: Protocol | None
-    login: str | None
-    password: str | None
-    refresh_url: str | None
+    protocol: Optional[Protocol]
+    login: Optional[str]
+    password: Optional[str]
+    refresh_url: Optional[str]
 
 
 def parse_proxy_str(proxy: str) -> ParsedProxy:
