@@ -38,7 +38,7 @@ A powerful and flexible Ethereum Layer 2 automation tool with multiple features 
 1. Clone the repository:
 ```
 git clone https://github.com/ekonugroho98/megaEth.git
-cd StarLabs-MegaETH
+cd BotJP-MegaETH
 ```
 
 2. Install dependencies:

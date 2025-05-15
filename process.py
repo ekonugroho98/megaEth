@@ -25,7 +25,7 @@ async def start():
             )
 
     try:
-        await check_version("0xStarLabs", "StarLabs-MegaETH")
+        await check_version("0xBotJP", "BotJP-MegaETH")
     except Exception as e:
         import traceback
 

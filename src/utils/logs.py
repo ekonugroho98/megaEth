@@ -14,7 +14,7 @@ class ProgressTracker:
     current: int = 0
     description: str = "Progress"
     _lock: Lock = Lock()
-    bar_length: int = 30  # Progress bar length in characters
+    bar_length: int = 30  # Длина прогресс-бара в символах
 
     def __post_init__(self):
         pass
@@ -30,7 +30,7 @@ class ProgressTracker:
             percentage = (self.current / self.total) * 100
             bar = self._create_progress_bar(percentage)
 
-            # Add emoji based on progress
+            # Добавляем эмодзи в зависимости от прогресса
             emoji = "⏳"
             if percentage >= 100:
                 emoji = "✅"
@@ -47,7 +47,7 @@ class ProgressTracker:
             self.total = total
 
     def __del__(self):
-        pass  # Remove tqdm closing
+        pass  # Убираем закрытие tqdm
 
 
 async def create_progress_tracker(
