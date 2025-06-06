@@ -171,7 +171,7 @@ class ExchangesConfig:
 @dataclass
 class SchedulerConfig:
     ENABLED: bool = False
-    INTERVAL_MINUTES: int = 1440
+    INTERVAL_HOURS: int = 24
     MAX_RETRIES: int = 3
     RETRY_DELAY_SECONDS: int = 300
     SEND_NOTIFICATIONS: bool = True
@@ -214,6 +214,16 @@ class Config:
             error_msg = f"Could not import tasks.py: {e}"
             print(f"Error: {error_msg}")
             raise ImportError(error_msg) from e
+
+        # Load scheduler config if exists
+        scheduler_data = data.get("SCHEDULER", {})
+        scheduler_config = SchedulerConfig(
+            ENABLED=scheduler_data.get("ENABLED", False),
+            INTERVAL_HOURS=scheduler_data.get("INTERVAL_HOURS", 24),
+            MAX_RETRIES=scheduler_data.get("MAX_RETRIES", 3),
+            RETRY_DELAY_SECONDS=scheduler_data.get("RETRY_DELAY_SECONDS", 300),
+            SEND_NOTIFICATIONS=scheduler_data.get("SEND_NOTIFICATIONS", True)
+        )
 
         return cls(
             SETTINGS=SettingsConfig(
@@ -345,6 +355,7 @@ class Config:
                     ONE_ACTION_PER_LAUNCH=data["DEPLOY"]["ZKCODEX"]["ONE_ACTION_PER_LAUNCH"],
                 ),
             ),
+            SCHEDULER=scheduler_config,
         )
 
 

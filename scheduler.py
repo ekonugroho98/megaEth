@@ -3,8 +3,10 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from loguru import logger
 from src.model.database import db_manager
 import process
-from src.utils.config import get_config
+from src.utils.config import get_config, Config
 from src.utils.telegram_logger import send_telegram_message
+import os
+import yaml
 
 async def send_notification(config, message):
     """Send notification if enabled in config"""
@@ -16,9 +18,9 @@ async def send_test_notification(config):
     test_message = (
         "🤖 Bot Notification Test\n\n"
         "✅ Telegram configuration is working!\n"
-        "📅 Scheduler will run every {} minutes\n"
+        "📅 Scheduler will run every {} hours\n"
         "🔄 Next run will regenerate tasks and start farming"
-    ).format(config.SCHEDULER.INTERVAL_MINUTES)
+    ).format(config.SCHEDULER.INTERVAL_HOURS)
     
     await send_notification(config, test_message)
 
@@ -58,17 +60,45 @@ async def job():
                 await send_notification(config, "❌ Max retries reached. Giving up.")
 
 async def main():
+    # Debug: Print current working directory and list files
+    logger.info(f"Current working directory: {os.getcwd()}")
+    logger.info(f"Files in current directory: {os.listdir('.')}")
+    
+    # Try to load config directly first
+    config_path = os.path.join(os.getcwd(), 'config.yaml')
+    logger.info(f"Trying to load config from: {config_path}")
+    
+    if os.path.exists(config_path):
+        with open(config_path, 'r') as f:
+            raw_config = yaml.safe_load(f)
+            logger.info(f"Raw scheduler config from file: {raw_config.get('SCHEDULER', {})}")
+    else:
+        logger.error(f"Config file not found at {config_path}")
+    
+    # Now load through the normal method
     config = get_config()
+    
+    # Debug logging
+    logger.info(f"Loaded scheduler config: ENABLED={config.SCHEDULER.ENABLED}, INTERVAL_HOURS={config.SCHEDULER.INTERVAL_HOURS}")
+    logger.info(f"Config file path: {os.path.abspath('config.yaml')}")
+    logger.info(f"Config file exists: {os.path.exists('config.yaml')}")
     
     if not config.SCHEDULER.ENABLED:
         logger.info("Scheduler is disabled in config. Exiting...")
         return
         
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(job, "interval", minutes=config.SCHEDULER.INTERVAL_MINUTES)
+    interval_hours = config.SCHEDULER.INTERVAL_HOURS
+    logger.info(f"Setting scheduler interval to {interval_hours} hours")
+    
+    # Force the interval to 24 hours for testing
+    interval_hours = 24
+    logger.info(f"Forcing scheduler interval to {interval_hours} hours")
+    
+    scheduler.add_job(job, "interval", hours=interval_hours)
     scheduler.start()
     
-    logger.info(f"Scheduler started with {config.SCHEDULER.INTERVAL_MINUTES} minutes interval")
+    logger.info(f"Scheduler started with {interval_hours} hours interval")
     
     # Send test notification
     await send_test_notification(config)

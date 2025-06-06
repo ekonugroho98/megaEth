@@ -71,8 +71,8 @@ SCHEDULER:
     # Enable/disable scheduler
     ENABLED: true
     
-    # Interval in minutes between task regeneration and farming
-    INTERVAL_MINUTES: 1440
+    # Interval in hours between task regeneration and farming
+    INTERVAL_HOURS: 24
     
     # Maximum number of retries if task generation or farming fails
     MAX_RETRIES: 3
