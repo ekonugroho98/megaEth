@@ -10,4 +10,6 @@ services:
     restart: unless-stopped
     environment:
       - PYTHONUNBUFFERED=1
+      - CONFIG_PATH=/app/config.yaml
+    working_dir: /app
     command: python scheduler.py 
