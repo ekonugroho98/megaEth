@@ -68,7 +68,7 @@ async def main():
     scheduler.add_job(job, "interval", minutes=config.SCHEDULER.INTERVAL_MINUTES)
     scheduler.start()
     
-    logger.info(f"Scheduler started with {config.SCHEDULER.INTERVAL_MINUTES} minute interval")
+    logger.info(f"Scheduler started with {config.SCHEDULER.INTERVAL_MINUTES} minutes interval")
     
     # Send test notification
     await send_test_notification(config)
