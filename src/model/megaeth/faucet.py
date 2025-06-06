@@ -10,6 +10,9 @@ from curl_cffi.requests import AsyncSession
 import json
 import platform
 from pynocaptcha import CloudFlareCracker, TlsV1Cracker
+from decimal import Decimal
+from web3 import Web3
+from src.utils.telegram_logger import send_telegram_message
 
 from src.utils.decorators import retry_async
 
@@ -24,6 +27,9 @@ async def faucet(
 ) -> bool:
 
     try:
+        # Get initial balance
+        initial_balance = await get_eth_balance(wallet.address)
+
         logger.info(
             f"[{account_index}] | Starting faucet for account {wallet.address}..."
         )
@@ -111,9 +117,23 @@ async def faucet(
         )
 
         if claim_result.json()['success']:
+            # Get new balance after claim
+            new_balance = await get_eth_balance(wallet.address)
+            balance_increase = new_balance - initial_balance
+            
             logger.success(
-                f"[{account_index}] | Successfully got tokens from faucet"
+                f"[{account_index}] | Successfully got tokens from faucet. Balance increased by {balance_increase:.6f} ETH"
             )
+            
+            # Send detailed notification
+            if config.SETTINGS.SEND_TELEGRAM_LOGS:
+                message = (
+                    f"💧 Faucet Claim Success\n\n"
+                    f"💳 Wallet: {account_index} | <code>{wallet.address[:6]}...{wallet.address[-4:]}</code>\n"
+                    f"💰 Balance Increase: {balance_increase:.6f} ETH\n"
+                    f"💵 New Balance: {new_balance:.6f} ETH"
+                )
+                await send_telegram_message(config, message)
             return True
 
         if "less than 24 hours have passed" in response_text:
@@ -129,9 +149,23 @@ async def faucet(
             raise Exception("Failed to send claim request")
 
         if '"Success"' in response_text:
+            # Get new balance after claim
+            new_balance = await get_eth_balance(wallet.address)
+            balance_increase = new_balance - initial_balance
+            
             logger.success(
-                f"[{account_index}] | Successfully got tokens from faucet"
+                f"[{account_index}] | Successfully got tokens from faucet. Balance increased by {balance_increase:.6f} ETH"
             )
+            
+            # Send detailed notification
+            if config.SETTINGS.SEND_TELEGRAM_LOGS:
+                message = (
+                    f"💧 Faucet Claim Success\n\n"
+                    f"💳 Wallet: {account_index} | <code>{wallet.address[:6]}...{wallet.address[-4:]}</code>\n"
+                    f"💰 Balance Increase: {balance_increase:.6f} ETH\n"
+                    f"💵 New Balance: {new_balance:.6f} ETH"
+                )
+                await send_telegram_message(config, message)
             return True
 
         if "Claimed already" in response_text:
@@ -161,4 +195,11 @@ async def faucet(
             )
         await asyncio.sleep(random_pause)
         raise
+
+
+async def get_eth_balance(address: str) -> Decimal:
+    """Get ETH balance for the wallet address"""
+    web3 = Web3(Web3.HTTPProvider("https://carrot.megaeth.com/rpc"))
+    balance_wei = web3.eth.get_balance(address)
+    return Decimal(web3.from_wei(balance_wei, 'ether'))
 

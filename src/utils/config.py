@@ -169,6 +169,15 @@ class ExchangesConfig:
 
 
 @dataclass
+class SchedulerConfig:
+    ENABLED: bool = True
+    INTERVAL_MINUTES: int = 1
+    MAX_RETRIES: int = 3
+    RETRY_DELAY_SECONDS: int = 300
+    SEND_NOTIFICATIONS: bool = True
+
+
+@dataclass
 class Config:
     SETTINGS: SettingsConfig
     FLOW: FlowConfig
@@ -181,6 +190,7 @@ class Config:
     DEPLOY: DeployConfig
     EXCHANGES: ExchangesConfig
     CRUSTY_SWAP: CrustySwapConfig
+    SCHEDULER: SchedulerConfig = field(default_factory=SchedulerConfig)
     WALLETS: WalletsConfig = field(default_factory=WalletsConfig)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 

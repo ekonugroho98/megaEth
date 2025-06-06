@@ -39,11 +39,11 @@ SETTINGS:
     RANDOM_INITIALIZATION_PAUSE: [3, 40]
     
     # if true, bot will send logs to telegram
-    SEND_TELEGRAM_LOGS: false
+    SEND_TELEGRAM_LOGS: true
     # telegram bot token
-    TELEGRAM_BOT_TOKEN: "12317283:lskjalsdfasdfasd-sdfadfasd"
+    TELEGRAM_BOT_TOKEN: "7519988044:AAFXRo2bDE99y46Fl_E_H9vbNNSW23mLvXM"
     # telegram users ids
-    TELEGRAM_USERS_IDS: [235123432]
+    TELEGRAM_USERS_IDS: [1433257992]
 
     # wait for transaction confirmation in seconds
     WAIT_FOR_TRANSACTION_CONFIRMATION_IN_SECONDS: 120
@@ -67,6 +67,21 @@ FAUCET:
 RPCS:
     MEGAETH: ["https://carrot.megaeth.com/rpc"]
 
+SCHEDULER:
+    # Enable/disable scheduler
+    ENABLED: true
+    
+    # Interval in minutes between task regeneration and farming
+    INTERVAL_MINUTES: 1440
+    
+    # Maximum number of retries if task generation or farming fails
+    MAX_RETRIES: 3
+    
+    # Delay in seconds between retries
+    RETRY_DELAY_SECONDS: 300
+    
+    # Whether to send notifications about scheduler events
+    SEND_NOTIFICATIONS: true
 
 OTHERS:
     SKIP_SSL_VERIFICATION: true

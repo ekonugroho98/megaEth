@@ -1,11 +1,12 @@
 version: '3.8'
 
 services:
-  app:
+  scheduler:
     build: .
-    container_name: megaeth
+    container_name: megaeth-scheduler
     volumes:
       - ./logs:/app/logs
     restart: unless-stopped
     environment:
-      - PYTHONUNBUFFERED=1 
+      - PYTHONUNBUFFERED=1
+    command: python scheduler.py 

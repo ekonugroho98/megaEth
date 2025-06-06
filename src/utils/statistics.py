@@ -3,8 +3,10 @@ from loguru import logger
 import pandas as pd
 from datetime import datetime
 import os
+import asyncio
 
 from src.utils.config import Config, WalletInfo
+from src.utils.telegram_logger import send_telegram_message
 
 
 def print_wallets_stats(config: Config, excel_path="data/progress.xlsx"):
@@ -66,19 +68,33 @@ def print_wallets_stats(config: Config, excel_path="data/progress.xlsx"):
             avg_transactions = total_transactions / wallets_count
 
             # Выводим таблицу и статистику
-            logger.info(
+            stats_message = (
                 f"\n{'='*50}\n"
                 f"         Wallets Statistics ({wallets_count} wallets)\n"
                 f"{'='*50}\n"
                 f"{table}\n"
                 f"{'='*50}\n"
-                f"{'='*50}"
+                f"{'='*50}\n\n"
+                f"Average balance: {avg_balance:.8f} ETH\n"
+                f"Average transactions: {avg_transactions:.1f}\n"
+                f"Total balance: {total_balance:.8f} ETH\n"
+                f"Total transactions: {total_transactions:,}"
             )
+            
+            logger.info(stats_message)
 
-            logger.info(f"Average balance: {avg_balance:.8f} ETH")
-            logger.info(f"Average transactions: {avg_transactions:.1f}")
-            logger.info(f"Total balance: {total_balance:.8f} ETH")
-            logger.info(f"Total transactions: {total_transactions:,}")
+            # Send to Telegram if enabled
+            if config.SETTINGS.SEND_TELEGRAM_LOGS:
+                telegram_message = (
+                    f"📊 *Wallet Statistics*\n\n"
+                    f"Total Wallets: {wallets_count}\n"
+                    f"Total Balance: {total_balance:.8f} ETH\n"
+                    f"Average Balance: {avg_balance:.8f} ETH\n"
+                    f"Total Transactions: {total_transactions:,}\n"
+                    f"Average Transactions: {avg_transactions:.1f}\n\n"
+                    f"```\n{table}\n```"
+                )
+                asyncio.create_task(send_telegram_message(config, telegram_message))
 
             # Экспорт в Excel
             # Создаем DataFrame для Excel
