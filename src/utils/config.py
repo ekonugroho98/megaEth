@@ -170,8 +170,8 @@ class ExchangesConfig:
 
 @dataclass
 class SchedulerConfig:
-    ENABLED: bool = True
-    INTERVAL_MINUTES: int = 1
+    ENABLED: bool = False
+    INTERVAL_MINUTES: int = 1440
     MAX_RETRIES: int = 3
     RETRY_DELAY_SECONDS: int = 300
     SEND_NOTIFICATIONS: bool = True
