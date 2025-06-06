@@ -12,7 +12,7 @@ from src.utils.check_github_version import check_version
 from src.utils.logs import ProgressTracker, create_progress_tracker
 from src.utils.config_browser import run
 
-async def start():
+async def start(auto_run: bool = False):
     async def launch_wrapper(index, proxy, private_key):
         async with semaphore:
             await account_flow(
@@ -33,30 +33,34 @@ async def start():
         logger.error(f"Failed to check version: {e}")
         logger.info("Continue with current version\n")
 
-    print("\nAvailable options:\n")
-    print("[1] ⭐️ Start farming")
-    print("[2] 💾 Database actions")
-    print("[3] 👋 Exit")
-    print()
+    if not auto_run:
+        print("\nAvailable options:\n")
+        print("[1] ⭐️ Start farming")
+        print("[2] 💾 Database actions")
+        print("[3] 👋 Exit")
+        print()
 
-    try:
-        choice = input("Enter option (1-4): ").strip()
-    except Exception as e:
-        logger.error(f"Input error: {e}")
-        return
+        try:
+            choice = input("Enter option (1-4): ").strip()
+        except Exception as e:
+            logger.error(f"Input error: {e}")
+            return
 
-    if choice == "3" or not choice:
-        return
-    elif choice == "1":
-        pass
-    elif choice == "2":
-        from src.model.database.db_manager import show_database_menu
+        if choice == "3" or not choice:
+            return
+        elif choice == "1":
+            pass
+        elif choice == "2":
+            from src.model.database.db_manager import show_database_menu
 
-        await show_database_menu()
-        await start()
+            await show_database_menu()
+            await start(auto_run=auto_run)
+            return
+        else:
+            logger.error(f"Invalid choice: {choice}")
+            return
     else:
-        logger.error(f"Invalid choice: {choice}")
-        return
+        choice = "1"
 
     config = src.utils.get_config()
 
@@ -161,7 +165,8 @@ async def start():
 
     print_wallets_stats(config)
 
-    input("Press Enter to continue...")
+    if not auto_run:
+        input("Press Enter to continue...")
 
 
 async def account_flow(

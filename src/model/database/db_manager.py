@@ -141,8 +141,11 @@ def generate_tasks_from_config(config) -> List[str]:
     return planned_tasks
 
 
-async def regenerate_tasks_for_completed():
-    """Генерация новых задач для завершенных кошельков"""
+async def regenerate_tasks_for_completed(auto_confirm: bool = False):
+    """Генерация новых задач для завершенных кошельков
+
+    :param auto_confirm: skip interactive confirmation when True
+    """
     try:
         db = Database()
         config = get_config()
@@ -154,15 +157,16 @@ async def regenerate_tasks_for_completed():
             logger.info("No completed wallets found")
             return
 
-        print("\n[1] Yes")
-        print("[2] No")
-        confirmation = input(
-            "\nThis will replace all tasks for completed wallets. Continue? (1-2): "
-        ).strip()
+        if not auto_confirm:
+            print("\n[1] Yes")
+            print("[2] No")
+            confirmation = input(
+                "\nThis will replace all tasks for completed wallets. Continue? (1-2): "
+            ).strip()
 
-        if confirmation != "1":
-            logger.info("Task regeneration cancelled")
-            return
+            if confirmation != "1":
+                logger.info("Task regeneration cancelled")
+                return
 
         # Подготавливаем данные для пакетного обновления
         wallet_tasks_data = []
@@ -186,8 +190,11 @@ async def regenerate_tasks_for_completed():
         logger.error(f"Error regenerating tasks: {e}")
 
 
-async def regenerate_tasks_for_all():
-    """Генерация новых задач для всех кошельков"""
+async def regenerate_tasks_for_all(auto_confirm: bool = False):
+    """Генерация новых задач для всех кошельков
+
+    :param auto_confirm: skip interactive confirmation when True
+    """
     try:
         db = Database()
         config = get_config()
@@ -201,15 +208,16 @@ async def regenerate_tasks_for_all():
             logger.info("No wallets found in database")
             return
 
-        print("\n[1] Yes")
-        print("[2] No")
-        confirmation = input(
-            "\nThis will replace all tasks for ALL wallets. Continue? (1-2): "
-        ).strip()
+        if not auto_confirm:
+            print("\n[1] Yes")
+            print("[2] No")
+            confirmation = input(
+                "\nThis will replace all tasks for ALL wallets. Continue? (1-2): "
+            ).strip()
 
-        if confirmation != "1":
-            logger.info("Task regeneration cancelled")
-            return
+            if confirmation != "1":
+                logger.info("Task regeneration cancelled")
+                return
 
         # Подготавливаем данные для пакетного обновления
         wallet_tasks_data = []

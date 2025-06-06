@@ -149,5 +149,11 @@ MY_CUSTOM_TASK = [
 python main.py
 ```
 
+### Scheduled farming
+Run the scheduler to automatically regenerate tasks and start farming at regular intervals:
+```
+python scheduler.py
+```
+
 ## ⚠️ Disclaimer 
 This tool is for educational purposes only. Use at your own risk and in accordance with relevant terms of service.
