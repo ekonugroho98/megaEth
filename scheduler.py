@@ -7,6 +7,7 @@ from src.utils.config import get_config, Config
 from src.utils.telegram_logger import send_telegram_message
 import os
 import yaml
+from datetime import datetime, timedelta
 
 async def send_notification(config, message):
     """Send notification if enabled in config"""
@@ -102,6 +103,10 @@ async def main():
     
     # Send test notification
     await send_test_notification(config)
+    
+    # Run job immediately on startup
+    logger.info("Running initial job...")
+    await job()
     
     try:
         await asyncio.Event().wait()

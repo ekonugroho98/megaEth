@@ -133,6 +133,18 @@ async def start(auto_run: bool = False):
         )
     logger.info(f"Accounts order: {account_order}")
 
+    # Log proxy assignments
+    logger.info("\nProxy Assignments:")
+    for idx in indices:
+        actual_index = (
+            config.SETTINGS.EXACT_ACCOUNTS_TO_USE[idx]
+            if config.SETTINGS.EXACT_ACCOUNTS_TO_USE
+            else start_index + idx
+        )
+        proxy = cycled_proxies[idx]
+        logger.info(f"Account #{actual_index} -> Proxy: {proxy}")
+    logger.info("")
+
     lock = asyncio.Lock()
     semaphore = asyncio.Semaphore(value=threads)
     tasks = []

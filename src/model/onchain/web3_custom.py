@@ -38,6 +38,11 @@ class Web3Custom:
                         if (self.use_proxy and self.proxy)
                         else None
                     )
+                    if proxy_settings:
+                        logger.info(f"{self.account_index} | Using proxy for RPC: {self.proxy}")
+                    else:
+                        logger.warning(f"{self.account_index} | No proxy used for RPC")
+                        
                     self.web3 = AsyncWeb3(
                         AsyncWeb3.AsyncHTTPProvider(
                             rpc_url,

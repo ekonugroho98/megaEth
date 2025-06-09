@@ -56,6 +56,7 @@ class Start:
 
     async def initialize(self):
         try:
+            logger.info(f"{self.account_index} | Initializing with proxy: {self.proxy}")
             self.session = await create_client(
                 self.proxy, self.config.OTHERS.SKIP_SSL_VERIFICATION
             )
