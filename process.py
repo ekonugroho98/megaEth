@@ -8,7 +8,6 @@ from src.utils.output import show_dev_info, show_logo
 from src.utils.proxy_parser import Proxy
 import src.model
 from src.utils.statistics import print_wallets_stats
-from src.utils.check_github_version import check_version
 from src.utils.logs import ProgressTracker, create_progress_tracker
 from src.utils.config_browser import run
 
@@ -23,15 +22,6 @@ async def start(auto_run: bool = False):
                 lock,
                 progress_tracker,
             )
-
-    try:
-        await check_version("0xBotJP", "BotJP-MegaETH")
-    except Exception as e:
-        import traceback
-
-        traceback.print_exc()
-        logger.error(f"Failed to check version: {e}")
-        logger.info("Continue with current version\n")
 
     if not auto_run:
         print("\nAvailable options:\n")
