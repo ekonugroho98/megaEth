@@ -1,3 +1,5 @@
+privatekey.txt
+config.json
 # Python
 __pycache__/
 *.py[cod]

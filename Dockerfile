@@ -1,4 +1,4 @@
-FROM python:3.10-slim
+FROM python:3.9-slim
 
 WORKDIR /app
 
@@ -18,4 +18,4 @@ COPY . .
 RUN mkdir -p logs
 
 # Run the application
-CMD ["python", "main.py"] 
+CMD ["python3", "run_bots.py"] 

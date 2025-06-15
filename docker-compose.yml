@@ -1,6 +1,23 @@
 version: '3.8'
 
 services:
+  faucet-bot:
+    build: .
+    volumes:
+      - ./config.json:/app/config.json
+    environment:
+      - AUTO_MODE=true
+    restart: unless-stopped
+
+  task-bot:
+    build: .
+    volumes:
+      - ./config.json:/app/config.json
+    environment:
+      - AUTO_MODE=true
+      - BOT_TYPE=task
+    restart: unless-stopped
+
   scheduler:
     build: .
     container_name: megaeth-scheduler

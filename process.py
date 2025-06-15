@@ -215,7 +215,6 @@ async def account_flow(
 
 async def wrapper(function, config: src.utils.config.Config, *args, **kwargs):
     attempts = config.SETTINGS.ATTEMPTS
-    attempts = 1
     for attempt in range(attempts):
         result = await function(*args, **kwargs)
         if isinstance(result, tuple) and result and isinstance(result[0], bool):
