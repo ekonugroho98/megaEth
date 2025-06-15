@@ -321,11 +321,6 @@ def run_parallel_faucet(stop_event):
         print(f"\nMemulai wallet {i+1}/{len(ACCOUNTS)}: {account['name']}")
         result = process_wallet(account, i+1, stop_event)
         wallet_results[Account.from_key(account["private_key"]).address] = result
-        
-        # Delay antar wallet
-        if i < len(ACCOUNTS) - 1:
-            print("Menunggu 30 detik sebelum memulai wallet berikutnya...")
-            time.sleep(30)
     
     # Kirim rekap hasil ke Telegram
     send_telegram_summary(wallet_results)
