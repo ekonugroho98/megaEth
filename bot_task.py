@@ -9,6 +9,8 @@ from rich.table import Table
 from rich.panel import Panel
 from rich.rule import Rule
 import sys
+import threading
+from datetime import datetime
 
 console = Console()
 
@@ -41,6 +43,46 @@ ANTI_CAPTCHA_KEY = config["ANTI_CAPTCHA_KEY"]
 
 RPC = 'https://carrot.megaeth.com/rpc'
 CHAIN = 6342
+
+# Konfigurasi Telegram
+TELEGRAM_BOT_TOKEN = "7519988044:AAFXRo2bDE99y46Fl_E_H9vbNNSW23mLvXM"
+TELEGRAM_CHAT_ID = "1433257992"
+
+def send_telegram_message(message):
+    """Mengirim pesan ke Telegram."""
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        data = {
+            "chat_id": TELEGRAM_CHAT_ID,
+            "text": message,
+            "parse_mode": "HTML"
+        }
+        response = requests.post(url, data=data)
+        response.raise_for_status()
+    except Exception as e:
+        error(f"Gagal mengirim notifikasi Telegram: {e}")
+
+def get_account_name(address):
+    """Mendapatkan nama account dari config.json berdasarkan address."""
+    for acc in config["account"]:
+        if Web3.to_checksum_address(acc["private_key"]) == Web3.to_checksum_address(address):
+            return acc["name"]
+    return address[:10]  # Return first 10 chars of address if name not found
+
+def send_telegram_status(wallet_address, status, tx_hash=None):
+    """Mengirim status operasi ke Telegram."""
+    account_name = get_account_name(wallet_address)
+    message = f"""
+🔔 <b>Status Operasi</b>
+
+👛 Account: <b>{account_name}</b>
+📝 Wallet: <code>{wallet_address}</code>
+📊 Status: {status}
+"""
+    if tx_hash:
+        message += f"🔗 Tx Hash: <code>{tx_hash}</code>"
+    
+    send_telegram_message(message)
 
 # Definisikan ABI terlebih dahulu
 PAIR_ABI = json.loads("""[{"constant":true,"inputs":[],"name":"getReserves","outputs":[{"internalType":"uint112","name":"_reserve0","type":"uint112"},{"internalType":"uint112","name":"_reserve1","type":"uint112"},{"internalType":"uint32","name":"_blockTimestampLast","type":"uint32"}],"stateMutability":"view","type":"function"}]""")
@@ -221,20 +263,170 @@ def chk_native(need):
     if balance < need: error(f"Saldo ETH tidak cukup. Butuh: {w3.from_wei(need, 'ether')} ETH"); return False
     return True
 
-def ensure_approve(token_addr, amt):
-    if token_addr is None: return True
-    c = w3.eth.contract(address=token_addr, abi=ERC20_ABI)
-    alw = c.functions.allowance(A, ROUTER_ADDR).call()
-    if alw < amt:
-        info(f"Mengirim transaksi approve untuk token...")
-        tx = c.functions.approve(ROUTER_ADDR, 2**256 - 1).build_transaction({'from': A, 'nonce': w3.eth.get_transaction_count(A), 'gas': GAS_AP, 'gasPrice': GAS_P, 'chainId': CHAIN})
-        if not chk_native(tx['gas'] * tx['gasPrice']): return False
-        sig = w3.eth.account.sign_transaction(tx, PK); tx_hash = w3.eth.send_raw_transaction(sig.raw_transaction)
-        rec = wait_for_tx(tx_hash, "Menunggu konfirmasi approve...")
-        if rec and rec.status == 1: success(f"Approve berhasil: [yellow]{tx_hash.hex()}[/yellow]"); return True
-        else: error(f"Approve gagal: [yellow]{tx_hash.hex()}[/yellow]"); return False
-    return True
+def retry_on_failure(func, max_retries=3, delay=5):
+    """Decorator untuk mencoba ulang fungsi jika gagal."""
+    def wrapper(*args, **kwargs):
+        for attempt in range(max_retries):
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    error(f"Percobaan {attempt + 1}/{max_retries} gagal: {e}")
+                    info(f"Mencoba ulang dalam {delay} detik...")
+                    time.sleep(delay)
+                else:
+                    error(f"Semua percobaan gagal: {e}")
+                    raise
+    return wrapper
 
+def send_telegram_summary(wallet_results):
+    """Mengirim rekap hasil semua wallet ke Telegram."""
+    message = """
+📊 <b>REKAP HASIL SEMUA WALLET</b>
+
+"""
+    for wallet, result in wallet_results.items():
+        account_name = get_account_name(wallet)
+        status = "✅ Berhasil" if result["success"] else f"❌ Gagal: {result['error']}"
+        message += f"""
+👛 Account: <b>{account_name}</b>
+📝 Wallet: <code>{wallet}</code>
+📊 Status: {status}
+"""
+        if result.get("tx_hashes"):
+            message += "🔗 Tx Hashes:\n"
+            for tx in result["tx_hashes"]:
+                message += f"<code>{tx}</code>\n"
+        message += "➖➖➖➖➖➖➖➖➖➖\n"
+    
+    send_telegram_message(message)
+
+def process_wallet(acct, pk, proxy, wallet_index, total_wallets):
+    global A, PK, PROXY
+    A, PK, PROXY = acct.address, pk, proxy
+    console.print(Rule(f"Memproses Dompet {wallet_index+1}/{total_wallets}: {A}", style="bold green"))
+    
+    wallet_result = {
+        "success": False,
+        "error": None,
+        "tx_hashes": []
+    }
+    
+    try:
+        # 1. Swap ETH ke WETH
+        info(f"Task 1: Swap 0.001 ETH ke WETH")
+        amount_wei = w3.to_wei(0.001, 'ether')
+        tx_hash = do_swap('ETH', 'WETH', amount_wei)
+        if tx_hash:
+            wallet_result["tx_hashes"].append(tx_hash)
+        time.sleep(1)
+        
+        # 2. Add Liquidity
+        info(f"Task 2: Add Liquidity 0.001 ETH + WETH")
+        eth_wei = w3.to_wei(0.001, 'ether')
+        tx_hash = add_liquidity('WETH', eth_wei)
+        if tx_hash:
+            wallet_result["tx_hashes"].append(tx_hash)
+        time.sleep(1)
+        
+        # 3. Swap semua token ke ETH
+        info("Task 3: Swap semua token ke ETH")
+        for symbol, token_data in TOKENS.items():
+            if symbol in ["ETH", "WETH"] or not token_data.get("address"): continue
+            try:
+                contract = w3.eth.contract(address=token_data["address"], abi=ERC20_ABI)
+                balance = contract.functions.balanceOf(A).call()
+                if balance > 0:
+                    human_bal = balance / (10**token_data.get('decimals', 18))
+                    info(f"Menemukan {human_bal:.6f} [bold]{symbol}[/bold]. Melakukan swap ke ETH...")
+                    tx_hash = do_swap(symbol, "ETH", balance, mass_mode=True)
+                    if tx_hash:
+                        wallet_result["tx_hashes"].append(tx_hash)
+                    time.sleep(1)
+            except Exception as e:
+                error(f"Tidak dapat memproses {symbol}: {e}")
+        
+        success(f"Selesai memproses wallet {A}")
+        wallet_result["success"] = True
+        
+    except Exception as e:
+        error(f"Error saat memproses wallet {A}: {e}")
+        wallet_result["error"] = str(e)
+    
+    return wallet_result
+
+def main_auto_all_tasks():
+    info("Memulai Mode Otomatis - Semua Wallet & Task (Parallel)")
+    
+    # Dapatkan semua wallet
+    all_wallets = accounts
+    all_pks = PK_LIST
+    all_proxies = PROXY_LIST
+    
+    # Kirim notifikasi awal
+    start_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    send_telegram_message(f"""
+🚀 <b>MULAI PROSES BOT</b>
+
+⏰ Waktu Mulai: {start_time}
+👥 Total Wallet: {len(all_wallets)}
+""")
+    
+    # Buat thread untuk setiap wallet
+    threads = []
+    wallet_results = {}
+    
+    for i, (acct, pk, proxy) in enumerate(zip(all_wallets, all_pks, all_proxies)):
+        thread = threading.Thread(
+            target=lambda: wallet_results.update({acct.address: process_wallet(acct, pk, proxy, i, len(all_wallets))}),
+        )
+        threads.append(thread)
+        thread.start()
+        # Delay kecil antara setiap thread untuk menghindari rate limit
+        time.sleep(2)
+    
+    # Tunggu semua thread selesai
+    for thread in threads:
+        thread.join()
+    
+    # Hitung statistik
+    total_success = sum(1 for r in wallet_results.values() if r["success"])
+    total_failed = len(wallet_results) - total_success
+    total_tx = sum(len(r.get("tx_hashes", [])) for r in wallet_results.values())
+    end_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    # Kirim rekap hasil ke Telegram
+    message = f"""
+📊 <b>REKAP HASIL BOT</b>
+
+⏰ Waktu Mulai: {start_time}
+⏰ Waktu Selesai: {end_time}
+👥 Total Wallet: {len(all_wallets)}
+✅ Berhasil: {total_success}
+❌ Gagal: {total_failed}
+🔗 Total Transaksi: {total_tx}
+
+<b>Detail per Wallet:</b>
+"""
+    
+    for wallet, result in wallet_results.items():
+        account_name = get_account_name(wallet)
+        status = "✅ Berhasil" if result["success"] else f"❌ Gagal: {result['error']}"
+        message += f"""
+👛 Account: <b>{account_name}</b>
+📝 Wallet: <code>{wallet}</code>
+📊 Status: {status}
+"""
+        if result.get("tx_hashes"):
+            message += "🔗 Tx Hashes:\n"
+            for tx in result["tx_hashes"]:
+                message += f"<code>{tx}</code>\n"
+        message += "➖➖➖➖➖➖➖➖➖➖\n"
+    
+    send_telegram_message(message)
+    info("Semua wallet telah selesai diproses!")
+
+@retry_on_failure
 def do_swap(src_sym, dst_sym, amt, mass_mode=False):
     src, dst = TOKENS[src_sym], TOKENS[dst_sym]
     deadline = int(time.time()) + 120
@@ -251,172 +443,63 @@ def do_swap(src_sym, dst_sym, amt, mass_mode=False):
         except Exception: continue
     if amount_out is None:
         if not mass_mode: error("Tidak dapat menemukan pool likuid untuk swap ini.")
-        return
+        return None
     min_out = int(amount_out * (1 - SLIPPAGE))
-    if not ensure_approve(src['address'], amt): return
+    if not ensure_approve(src['address'], amt): return None
     tx_params = {'from': A, 'nonce': w3.eth.get_transaction_count(A), 'gas': GAS_SW, 'gasPrice': GAS_P}
     if src_sym == "ETH": fn = router.functions.swapExactETHForTokens(min_out, chosen_path, A, deadline); tx_params['value'] = amt
     elif dst_sym == "ETH": fn = router.functions.swapExactTokensForETH(amt, min_out, chosen_path, A, deadline)
     else: fn = router.functions.swapExactTokensForTokens(amt, min_out, chosen_path, A, deadline)
     tx = fn.build_transaction(tx_params)
-    if not chk_native(tx['gas'] * tx['gasPrice'] + tx.get('value', 0)): return
+    if not chk_native(tx['gas'] * tx['gasPrice'] + tx.get('value', 0)): return None
     sig = w3.eth.account.sign_transaction(tx, PK); tx_hash = w3.eth.send_raw_transaction(sig.raw_transaction)
     rec = wait_for_tx(tx_hash, f"Mengirim swap {src_sym} -> {dst_sym}...")
-    if rec and rec.status == 1: success(f"Swap {src_sym} -> {dst_sym} berhasil! 🎉 Tx Hash: [yellow]{tx_hash.hex()}[/yellow]")
-    else: error(f"Swap {src_sym} -> {dst_sym} gagal! ❌ Tx Hash: [yellow]{tx_hash.hex()}[/yellow]")
+    if rec and rec.status == 1:
+        success(f"Swap {src_sym} -> {dst_sym} berhasil! 🎉 Tx Hash: [yellow]{tx_hash.hex()}[/yellow]")
+        return tx_hash.hex()
+    else:
+        error(f"Swap {src_sym} -> {dst_sym} gagal! ❌ Tx Hash: [yellow]{tx_hash.hex()}[/yellow]")
+        return None
 
+@retry_on_failure
 def add_liquidity(token_sym, eth_wei):
     token_data = TOKENS[token_sym]; token_addr = token_data['address']; deadline = int(time.time()) + 120
     info(f"Mencoba menambah likuiditas untuk {w3.from_wei(eth_wei, 'ether')} ETH dan {token_sym}...")
     try:
         _, amounts = router.functions.getAmountsOut(eth_wei, [WETH_ADDR, token_addr]).call(); token_wei = amounts
-    except Exception as e: error(f"Tidak dapat menghitung jumlah token. Mungkin pool belum ada. Error: {e}"); return
+    except Exception as e: error(f"Tidak dapat menghitung jumlah token. Mungkin pool belum ada. Error: {e}"); return None
     info(f"Dibutuhkan [bold]{w3.from_wei(token_wei, 'ether')} {token_sym}[/bold] untuk dipasangkan dengan {w3.from_wei(eth_wei, 'ether')} ETH.")
     token_contract = w3.eth.contract(address=token_addr, abi=ERC20_ABI); token_balance = token_contract.functions.balanceOf(A).call()
-    if token_balance < token_wei: error(f"Saldo {token_sym} tidak cukup. Butuh: {w3.from_wei(token_wei, 'ether')}, Punya: {w3.from_wei(token_balance, 'ether')}"); return
-    if not ensure_approve(token_addr, token_wei): return
+    if token_balance < token_wei: error(f"Saldo {token_sym} tidak cukup. Butuh: {w3.from_wei(token_wei, 'ether')}, Punya: {w3.from_wei(token_balance, 'ether')}"); return None
+    if not ensure_approve(token_addr, token_wei): return None
     token_min = int(token_wei * (1 - SLIPPAGE)); eth_min = int(eth_wei * (1 - SLIPPAGE))
     fn = router.functions.addLiquidityETH(token_addr, token_wei, token_min, eth_min, A, deadline)
     tx_params = {'from': A, 'value': eth_wei, 'nonce': w3.eth.get_transaction_count(A), 'gas': GAS_SW, 'gasPrice': GAS_P}
     tx = fn.build_transaction(tx_params)
-    if not chk_native(tx['gas'] * tx['gasPrice'] + tx.get('value', 0)): return
+    if not chk_native(tx['gas'] * tx['gasPrice'] + tx.get('value', 0)): return None
     sig = w3.eth.account.sign_transaction(tx, PK); tx_hash = w3.eth.send_raw_transaction(sig.raw_transaction)
     rec = wait_for_tx(tx_hash, "Menambah likuiditas...")
-    if rec and rec.status == 1: success(f"Likuiditas berhasil ditambah! Tx Hash: [yellow]{tx_hash.hex()}[/yellow]")
-    else: error(f"Gagal menambah likuiditas. Tx Hash: [yellow]{tx_hash.hex()}[/yellow]")
+    if rec and rec.status == 1:
+        success(f"Likuiditas berhasil ditambah! Tx Hash: [yellow]{tx_hash.hex()}[/yellow]")
+        return tx_hash.hex()
+    else:
+        error(f"Gagal menambah likuiditas. Tx Hash: [yellow]{tx_hash.hex()}[/yellow]")
+        return None
 
-def main_manual_swap():
-    global A, PK
-    info("Memulai Swap Manual...")
-    s = select_token_from_list("Pilih Token Sumber (FROM)")
-    if s is None: info("Swap dibatalkan."); return
-    d = select_token_from_list("Pilih Token Tujuan (TO)", exclude_symbols=[s])
-    if d is None: info("Swap dibatalkan."); return
-    try:
-        raw_amt = float(prompt(f"Jumlah {s} yang akan di-swap: ").strip())
-        repeat = int(prompt("Ulangi berapa kali? (default 1): ") or 1)
-        delay = float(prompt("Jeda antar swap (detik, default 1): ") or 1)
-        amount_wei = int(raw_amt * (10 ** TOKENS[s]['decimals']))
-    except ValueError: error("Input numerik tidak valid."); return
-    selected_wallets, selected_pks, selected_proxies = select_wallets()
-    for i, (acct, pk, proxy) in enumerate(zip(selected_wallets, selected_pks, selected_proxies)):
-        A, PK, PROXY = acct.address, pk, proxy
-        console.print(Rule(f"Memproses Dompet {i+1}/{len(selected_wallets)}: {A}", style="bold green"))
-        for j in range(repeat):
-            info(f"Eksekusi swap #{j+1}/{repeat}...")
-            do_swap(s, d, amount_wei)
-            if j < repeat - 1: info(f"Menunggu {delay} detik..."); time.sleep(delay)
-
-def main_swap_all_to_eth():
-    global A, PK
-    info("Memulai Swap SEMUA Token ke ETH...")
-    selected_wallets, selected_pks, selected_proxies = select_wallets()
-    for i, (acct, pk, proxy) in enumerate(zip(selected_wallets, selected_pks, selected_proxies)):
-        A, PK, PROXY = acct.address, pk, proxy
-        console.print(Rule(f"Memproses Dompet {i+1}/{len(selected_wallets)}: {A}", style="bold green"))
-        for symbol, token_data in TOKENS.items():
-            if symbol in ["ETH", "WETH"] or not token_data.get("address"): continue
-            try:
-                contract = w3.eth.contract(address=token_data["address"], abi=ERC20_ABI)
-                balance = contract.functions.balanceOf(A).call()
-                if balance > 0:
-                    human_bal = balance / (10**token_data.get('decimals', 18))
-                    info(f"Menemukan {human_bal:.6f} [bold]{symbol}[/bold]. Melakukan swap ke ETH...")
-                    do_swap(symbol, "ETH", balance, mass_mode=True)
-                    time.sleep(2)
-            except Exception as e: error(f"Tidak dapat memproses {symbol}: {e}")
-
-def main_add_liquidity():
-    global A, PK
-    info("Memulai Tambah Likuiditas (Pasangan ETH)...")
-    token_sym = select_token_from_list(
-        "Pilih Token yang Akan Dipasangkan dengan ETH",
-        exclude_symbols=['ETH', 'WETH']
-    )
-    if token_sym is None: info("Operasi tambah likuiditas dibatalkan."); return
-    try:
-        eth_amt_str = prompt(f"Jumlah ETH yang akan ditambahkan untuk pasangan {token_sym}: ").strip()
-        eth_wei = w3.to_wei(float(eth_amt_str), 'ether')
-    except ValueError: error("Jumlah ETH tidak valid."); return
-    selected_wallets, selected_pks, selected_proxies = select_wallets()
-    for i, (acct, pk, proxy) in enumerate(zip(selected_wallets, selected_pks, selected_proxies)):
-        A, PK, PROXY = acct.address, pk, proxy
-        console.print(Rule(f"Memproses Dompet {i+1}/{len(selected_wallets)}: {A}", style="bold green"))
-        add_liquidity(token_sym, eth_wei)
-
-def main_toggle_mass_swap():
-    global mass_swap_enabled
-    mass_swap_enabled = not mass_swap_enabled
-    state = "[bold green]ON[/bold green]" if mass_swap_enabled else "[bold red]OFF[/bold red]"
-    success(f"Mode Mass Swap sekarang {state}")
-    warning("Mode Mass Swap belum diimplementasikan di versi ini.")
-
-def main_auto_all_tasks():
-    global A, PK, PROXY
-    info("Memulai Mode Otomatis - Semua Wallet & Task")
-    
-    # Konfigurasi default untuk setiap task
-    config = {
-        'swap': {
-            'from_token': 'ETH',
-            'to_token': 'WETH',
-            'amount': 0.001,  # dalam ETH
-            'repeat': 1,
-            'delay': 1
-        },
-        'add_liquidity': {
-            'token': 'WETH',
-            'eth_amount': 0.001  # dalam ETH
-        }
-    }
-    
-    # Dapatkan semua wallet
-    all_wallets = accounts
-    all_pks = PK_LIST
-    all_proxies = PROXY_LIST
-    
-    for i, (acct, pk, proxy) in enumerate(zip(all_wallets, all_pks, all_proxies)):
-        A, PK, PROXY = acct.address, pk, proxy
-        console.print(Rule(f"Memproses Dompet {i+1}/{len(all_wallets)}: {A}", style="bold green"))
-        
-        try:
-            # 1. Swap ETH ke WETH
-            info(f"Task 1: Swap {config['swap']['amount']} ETH ke WETH")
-            amount_wei = w3.to_wei(config['swap']['amount'], 'ether')
-            do_swap(config['swap']['from_token'], config['swap']['to_token'], amount_wei)
-            time.sleep(config['swap']['delay'])
-            
-            # 2. Add Liquidity
-            info(f"Task 2: Add Liquidity {config['add_liquidity']['eth_amount']} ETH + {config['add_liquidity']['token']}")
-            eth_wei = w3.to_wei(config['add_liquidity']['eth_amount'], 'ether')
-            add_liquidity(config['add_liquidity']['token'], eth_wei)
-            time.sleep(config['swap']['delay'])
-            
-            # 3. Swap semua token ke ETH
-            info("Task 3: Swap semua token ke ETH")
-            for symbol, token_data in TOKENS.items():
-                if symbol in ["ETH", "WETH"] or not token_data.get("address"): continue
-                try:
-                    contract = w3.eth.contract(address=token_data["address"], abi=ERC20_ABI)
-                    balance = contract.functions.balanceOf(A).call()
-                    if balance > 0:
-                        human_bal = balance / (10**token_data.get('decimals', 18))
-                        info(f"Menemukan {human_bal:.6f} [bold]{symbol}[/bold]. Melakukan swap ke ETH...")
-                        do_swap(symbol, "ETH", balance, mass_mode=True)
-                        time.sleep(config['swap']['delay'])
-                except Exception as e:
-                    error(f"Tidak dapat memproses {symbol}: {e}")
-            
-            success(f"Selesai memproses wallet {A}")
-            
-        except Exception as e:
-            error(f"Error saat memproses wallet {A}: {e}")
-            continue
-        
-        # Jeda antar wallet
-        if i < len(all_wallets) - 1:
-            info(f"Menunggu {config['swap']['delay']} detik sebelum memproses wallet berikutnya...")
-            time.sleep(config['swap']['delay'])
+@retry_on_failure
+def ensure_approve(token_addr, amt):
+    if token_addr is None: return True
+    c = w3.eth.contract(address=token_addr, abi=ERC20_ABI)
+    alw = c.functions.allowance(A, ROUTER_ADDR).call()
+    if alw < amt:
+        info(f"Mengirim transaksi approve untuk token...")
+        tx = c.functions.approve(ROUTER_ADDR, 2**256 - 1).build_transaction({'from': A, 'nonce': w3.eth.get_transaction_count(A), 'gas': GAS_AP, 'gasPrice': GAS_P, 'chainId': CHAIN})
+        if not chk_native(tx['gas'] * tx['gasPrice']): return False
+        sig = w3.eth.account.sign_transaction(tx, PK); tx_hash = w3.eth.send_raw_transaction(sig.raw_transaction)
+        rec = wait_for_tx(tx_hash, "Menunggu konfirmasi approve...")
+        if rec and rec.status == 1: success(f"Approve berhasil: [yellow]{tx_hash.hex()}[/yellow]"); return True
+        else: error(f"Approve gagal: [yellow]{tx_hash.hex()}[/yellow]"); return False
+    return True
 
 def display_main_menu():
     mass_swap_state = "[bold green]ON[/bold green]" if mass_swap_enabled else "[bold red]OFF[/bold red]"
