@@ -150,26 +150,6 @@ def claim(session, addr, token, thread_id):
         return False, str(e)
 
 @retry_on_failure(max_retries=3, delay=5)
-def send_eth(private_key, from_address, thread_id):
-    log.info(f"[Thread {thread_id}] [cyan]💸 Mempersiapkan pengiriman ETH dari {from_address[:10]}...[/]")
-    web3 = Web3(Web3.HTTPProvider(RPC_URL, {"proxies": BASE_PROXY}))
-    if not web3.is_connected():
-        raise Exception(f"Gagal terhubung ke RPC {RPC_URL}")
-        
-    amount_wei = web3.to_wei(AMOUNT_TO_SEND_ETH, "ether")
-    nonce = web3.eth.get_transaction_count(from_address)
-    to_checksum = Web3.to_checksum_address(from_address)
-    gas_price = web3.to_wei(0.01, "gwei")
-    tx = {
-        "from": from_address, "to": to_checksum, "value": amount_wei,
-        "gas": 21000, "gasPrice": gas_price, "nonce": nonce, "chainId": 6342
-    }
-    signed_tx = web3.eth.account.sign_transaction(tx, private_key=private_key)
-    tx_hash = web3.eth.send_raw_transaction(signed_tx.raw_transaction)
-    log.info(f"[Thread {thread_id}] [bold green]🚀 ETH berhasil dikirim![/] Tx hash: [cyan]{web3.to_hex(tx_hash)}[/]")
-    return web3.to_hex(tx_hash)
-
-@retry_on_failure(max_retries=3, delay=5)
 def check_balance(address, thread_id):
     web3 = Web3(Web3.HTTPProvider(RPC_URL, {"proxies": BASE_PROXY}))
     if not web3.is_connected():
@@ -284,10 +264,6 @@ def process_wallet(account, thread_id, stop_event):
             success, tx_hash = claim(session, address, cap_token, thread_id)
             if success and tx_hash:
                 wallet_result["tx_hashes"].append(tx_hash)
-                # Kirim ETH
-                eth_tx_hash = send_eth(private_key, address, thread_id)
-                if eth_tx_hash:
-                    wallet_result["tx_hashes"].append(eth_tx_hash)
                 wallet_result["success"] = True
             
             # Update balance
@@ -334,17 +310,30 @@ def run_parallel_faucet(stop_event):
     threads = []
     wallet_results = {}
     
-    for i, account in enumerate(ACCOUNTS):
-        thread = threading.Thread(
-            target=lambda: wallet_results.update({Account.from_key(account["private_key"]).address: process_wallet(account, i + 1, stop_event)}),
-        )
-        threads.append(thread)
-        thread.start()
-        time.sleep(2)  # Delay kecil antara setiap thread
-    
-    # Tunggu semua thread selesai
-    for thread in threads:
-        thread.join()
+    # Proses wallet per 5 akun
+    batch_size = 5
+    for i in range(0, len(ACCOUNTS), batch_size):
+        batch = ACCOUNTS[i:i + batch_size]
+        log.info(f"[bold blue]Memulai batch {i//batch_size + 1} dengan {len(batch)} wallet...[/]")
+        
+        # Buat thread untuk batch ini
+        batch_threads = []
+        for j, account in enumerate(batch):
+            thread = threading.Thread(
+                target=lambda: wallet_results.update({Account.from_key(account["private_key"]).address: process_wallet(account, i + j + 1, stop_event)}),
+            )
+            batch_threads.append(thread)
+            thread.start()
+            time.sleep(2)  # Delay kecil antara setiap thread dalam batch
+        
+        # Tunggu semua thread dalam batch selesai
+        for thread in batch_threads:
+            thread.join()
+            
+        # Delay antar batch
+        if i + batch_size < len(ACCOUNTS):
+            log.info(f"[blue]⏳ Menunggu 30 detik sebelum memulai batch berikutnya...[/]")
+            time.sleep(30)
     
     # Kirim rekap hasil ke Telegram
     send_telegram_summary(wallet_results)
