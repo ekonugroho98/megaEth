@@ -244,55 +244,46 @@ def process_wallet(account, thread_id, stop_event):
     
     print(f"[Thread {thread_id}] Memulai proses untuk wallet {account_name}...")
     
-    while not stop_event.is_set():
-        try:
-            # Setup session dengan proxy
-            session = requests.Session()
-            session.proxies.update({
-                "http": proxy,
-                "https": proxy
-            })
-            
-            # Cek saldo
-            balance = check_balance(address, thread_id)
-            print(f"[Thread {thread_id}] Saldo {address[:10]}: {balance:.4f} ETH")
-            
-            # Proses CAPTCHA
-            print(f"[Thread {thread_id}] Mengirim permintaan CAPTCHA ke Anti-Captcha...")
-            cap_id = submit_captcha(session, thread_id)
-            print(f"[Thread {thread_id}] Permintaan CAPTCHA diterima. Task ID: {cap_id}")
-            
-            cap_token = get_captcha_result(session, cap_id, thread_id)
-            print(f"[Thread {thread_id}] CAPTCHA berhasil diselesaikan!")
-            
-            # Klaim
-            print(f"[Thread {thread_id}] Mencoba melakukan klaim untuk wallet {address[:10]}...")
-            success, tx_hash = claim(session, address, cap_token, thread_id)
-            if success and tx_hash:
-                wallet_result["tx_hashes"].append(tx_hash)
-                wallet_result["success"] = True
-                print(f"[Thread {thread_id}] Klaim sukses! Tx: {tx_hash}")
-            else:
-                print(f"[Thread {thread_id}] Klaim gagal: {tx_hash}")
-            
-            # Update balance
-            wallet_result["balance"] = get_wallet_balance(address)
-            
-            # Tunggu 24 jam
-            next_run = datetime.now() + timedelta(days=1)
-            wait_seconds = 86400
-            print(f"[Thread {thread_id}] Siklus selesai. Klaim berikutnya pada: {next_run.strftime('%Y-%m-%d %H:%M:%S')}")
-            
-            # Tunggu sampai waktu berikutnya atau stop event
-            for _ in range(wait_seconds):
-                if stop_event.is_set():
-                    break
-                time.sleep(1)
-                
-        except Exception as e:
-            print(f"[Thread {thread_id}] Error: {str(e)}")
-            time.sleep(5)
-            continue
+    try:
+        # Setup session dengan proxy
+        session = requests.Session()
+        session.proxies.update({
+            "http": proxy,
+            "https": proxy
+        })
+        
+        # Cek saldo
+        balance = check_balance(address, thread_id)
+        print(f"[Thread {thread_id}] Saldo {address[:10]}: {balance:.4f} ETH")
+        
+        # Proses CAPTCHA
+        print(f"[Thread {thread_id}] Mengirim permintaan CAPTCHA ke Anti-Captcha...")
+        cap_id = submit_captcha(session, thread_id)
+        print(f"[Thread {thread_id}] Permintaan CAPTCHA diterima. Task ID: {cap_id}")
+        
+        cap_token = get_captcha_result(session, cap_id, thread_id)
+        print(f"[Thread {thread_id}] CAPTCHA berhasil diselesaikan!")
+        
+        # Klaim
+        print(f"[Thread {thread_id}] Mencoba melakukan klaim untuk wallet {address[:10]}...")
+        success, tx_hash = claim(session, address, cap_token, thread_id)
+        if success and tx_hash:
+            wallet_result["tx_hashes"].append(tx_hash)
+            wallet_result["success"] = True
+            print(f"[Thread {thread_id}] Klaim sukses! Tx: {tx_hash}")
+        else:
+            print(f"[Thread {thread_id}] Klaim gagal: {tx_hash}")
+            wallet_result["error"] = tx_hash
+            # Jika gagal karena cooldown 24 jam, langsung return
+            if "less than 24 hours" in str(tx_hash):
+                return wallet_result
+        
+        # Update balance
+        wallet_result["balance"] = get_wallet_balance(address)
+        
+    except Exception as e:
+        print(f"[Thread {thread_id}] Error: {str(e)}")
+        wallet_result["error"] = str(e)
     
     return wallet_result
 
