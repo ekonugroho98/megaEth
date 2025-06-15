@@ -73,9 +73,10 @@ MEGAETH_API_URL = "https://carrot.megaeth.com/claim"
 RPC_URL = "https://carrot.megaeth.com/rpc"
 AMOUNT_TO_SEND_ETH = 0.00499
 
+# Use proxy from first account if available
 BASE_PROXY = {
-    "http": config["PROXY"],
-    "https": config["PROXY"]
+    "http": ACCOUNTS[0]["proxy"] if ACCOUNTS else None,
+    "https": ACCOUNTS[0]["proxy"] if ACCOUNTS else None
 }
 
 # Konfigurasi Telegram
@@ -358,18 +359,10 @@ def main():
     )
     console.print(title)
 
-    menu_table = Table(show_header=False, box=None)
-    menu_table.add_row("[bold cyan]1.[/]", "Load dari config.json (klaim tiap 24 jam)")
-    console.print(Panel(menu_table, title="[yellow]PILIH FITUR[/]", border_style="yellow"))
-
-    mode = console.input("[bold green]Pilih fitur (1): [/]").strip()
+    # Run automatically in Docker environment
     stop_event = threading.Event()
-
     try:
-        if mode == "1":
-            run_parallel_faucet(stop_event)
-        else:
-            log.error("❌ Input tidak valid. Harap pilih 1.")
+        run_parallel_faucet(stop_event)
     except (KeyboardInterrupt, EOFError):
         log.warning("\n[bold yellow]⚠️ Program dihentikan oleh pengguna. Mengirim sinyal berhenti ke semua thread...[/]")
         stop_event.set()

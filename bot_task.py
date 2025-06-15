@@ -431,34 +431,97 @@ def do_swap(src_sym, dst_sym, amt, mass_mode=False):
     src, dst = TOKENS[src_sym], TOKENS[dst_sym]
     deadline = int(time.time()) + 120
     if not mass_mode: info(f"Mempersiapkan swap {w3.from_wei(amt, 'ether')} {src_sym} -> {dst_sym}")
+    
+    # Special handling for ETH -> WETH
+    if src_sym == "ETH" and dst_sym == "WETH":
+        try:
+            weth_contract = w3.eth.contract(address=WETH_ADDR, abi=WETH_DEPOSIT_ABI)
+            tx_params = {
+                'from': A,
+                'value': amt,
+                'nonce': w3.eth.get_transaction_count(A),
+                'gas': GAS_SW,
+                'gasPrice': GAS_P
+            }
+            tx = weth_contract.functions.deposit().build_transaction(tx_params)
+            if not chk_native(tx['gas'] * tx['gasPrice'] + tx.get('value', 0)):
+                return None
+            sig = w3.eth.account.sign_transaction(tx, PK)
+            tx_hash = w3.eth.send_raw_transaction(sig.raw_transaction)
+            rec = wait_for_tx(tx_hash, f"Mengirim deposit ETH -> WETH...")
+            if rec and rec.status == 1:
+                success(f"Deposit ETH -> WETH berhasil! 🎉 Tx Hash: [yellow]{tx_hash.hex()}[/yellow]")
+                return tx_hash.hex()
+            else:
+                error(f"Deposit ETH -> WETH gagal! ❌ Tx Hash: [yellow]{tx_hash.hex()}[/yellow]")
+                return None
+        except Exception as e:
+            error(f"Error during ETH -> WETH deposit: {e}")
+            return None
+    
+    # Handle other swaps
     paths, chosen_path, amount_out = [], None, None
-    if src['address'] and dst['address']: paths = [[src['address'], WETH_ADDR, dst['address']], [src['address'], dst['address']]]
-    elif src['address']: paths = [[src['address'], WETH_ADDR]]
-    else: paths = [[WETH_ADDR, dst['address']]]
+    
+    if dst_sym == "ETH":
+        paths = [[src['address'], WETH_ADDR]]
+    elif src['address'] and dst['address']:
+        paths = [[src['address'], WETH_ADDR, dst['address']], [src['address'], dst['address']]]
+    else:
+        paths = [[src['address'], WETH_ADDR]] if src['address'] else [[WETH_ADDR, dst['address']]]
+    
     for p in paths:
         try:
             amounts = router.functions.getAmountsOut(amt, p).call()
             amount_out, chosen_path = amounts[-1], p
             break
-        except Exception: continue
+        except Exception as e:
+            if not mass_mode:
+                error(f"Error calculating amounts for path {p}: {e}")
+            continue
+            
     if amount_out is None:
         if not mass_mode: error("Tidak dapat menemukan pool likuid untuk swap ini.")
         return None
+        
     min_out = int(amount_out * (1 - SLIPPAGE))
-    if not ensure_approve(src['address'], amt): return None
-    tx_params = {'from': A, 'nonce': w3.eth.get_transaction_count(A), 'gas': GAS_SW, 'gasPrice': GAS_P}
-    if src_sym == "ETH": fn = router.functions.swapExactETHForTokens(min_out, chosen_path, A, deadline); tx_params['value'] = amt
-    elif dst_sym == "ETH": fn = router.functions.swapExactTokensForETH(amt, min_out, chosen_path, A, deadline)
-    else: fn = router.functions.swapExactTokensForTokens(amt, min_out, chosen_path, A, deadline)
-    tx = fn.build_transaction(tx_params)
-    if not chk_native(tx['gas'] * tx['gasPrice'] + tx.get('value', 0)): return None
-    sig = w3.eth.account.sign_transaction(tx, PK); tx_hash = w3.eth.send_raw_transaction(sig.raw_transaction)
-    rec = wait_for_tx(tx_hash, f"Mengirim swap {src_sym} -> {dst_sym}...")
-    if rec and rec.status == 1:
-        success(f"Swap {src_sym} -> {dst_sym} berhasil! 🎉 Tx Hash: [yellow]{tx_hash.hex()}[/yellow]")
-        return tx_hash.hex()
-    else:
-        error(f"Swap {src_sym} -> {dst_sym} gagal! ❌ Tx Hash: [yellow]{tx_hash.hex()}[/yellow]")
+    
+    # Handle approvals
+    if src_sym != "ETH" and not ensure_approve(src['address'], amt):
+        return None
+        
+    tx_params = {
+        'from': A,
+        'nonce': w3.eth.get_transaction_count(A),
+        'gas': GAS_SW,
+        'gasPrice': GAS_P
+    }
+    
+    try:
+        if src_sym == "ETH":
+            fn = router.functions.swapExactETHForTokens(min_out, chosen_path, A, deadline)
+            tx_params['value'] = amt
+        elif dst_sym == "ETH":
+            fn = router.functions.swapExactTokensForETH(amt, min_out, chosen_path, A, deadline)
+        else:
+            fn = router.functions.swapExactTokensForTokens(amt, min_out, chosen_path, A, deadline)
+            
+        tx = fn.build_transaction(tx_params)
+        if not chk_native(tx['gas'] * tx['gasPrice'] + tx.get('value', 0)):
+            return None
+            
+        sig = w3.eth.account.sign_transaction(tx, PK)
+        tx_hash = w3.eth.send_raw_transaction(sig.raw_transaction)
+        rec = wait_for_tx(tx_hash, f"Mengirim swap {src_sym} -> {dst_sym}...")
+        
+        if rec and rec.status == 1:
+            success(f"Swap {src_sym} -> {dst_sym} berhasil! 🎉 Tx Hash: [yellow]{tx_hash.hex()}[/yellow]")
+            return tx_hash.hex()
+        else:
+            error(f"Swap {src_sym} -> {dst_sym} gagal! ❌ Tx Hash: [yellow]{tx_hash.hex()}[/yellow]")
+            return None
+            
+    except Exception as e:
+        error(f"Error during swap {src_sym} -> {dst_sym}: {e}")
         return None
 
 @retry_on_failure
