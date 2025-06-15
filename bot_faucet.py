@@ -242,7 +242,7 @@ def process_wallet(account, thread_id, stop_event):
         "balance": get_wallet_balance(address)
     }
     
-    log.info(f"[Thread {thread_id}] [bold blue]Memulai proses untuk wallet {account_name}...[/]")
+    print(f"[Thread {thread_id}] Memulai proses untuk wallet {account_name}...")
     
     while not stop_event.is_set():
         try:
@@ -254,17 +254,26 @@ def process_wallet(account, thread_id, stop_event):
             })
             
             # Cek saldo
-            check_balance(address, thread_id)
+            balance = check_balance(address, thread_id)
+            print(f"[Thread {thread_id}] Saldo {address[:10]}: {balance:.4f} ETH")
             
             # Proses CAPTCHA
+            print(f"[Thread {thread_id}] Mengirim permintaan CAPTCHA ke Anti-Captcha...")
             cap_id = submit_captcha(session, thread_id)
+            print(f"[Thread {thread_id}] Permintaan CAPTCHA diterima. Task ID: {cap_id}")
+            
             cap_token = get_captcha_result(session, cap_id, thread_id)
+            print(f"[Thread {thread_id}] CAPTCHA berhasil diselesaikan!")
             
             # Klaim
+            print(f"[Thread {thread_id}] Mencoba melakukan klaim untuk wallet {address[:10]}...")
             success, tx_hash = claim(session, address, cap_token, thread_id)
             if success and tx_hash:
                 wallet_result["tx_hashes"].append(tx_hash)
                 wallet_result["success"] = True
+                print(f"[Thread {thread_id}] Klaim sukses! Tx: {tx_hash}")
+            else:
+                print(f"[Thread {thread_id}] Klaim gagal: {tx_hash}")
             
             # Update balance
             wallet_result["balance"] = get_wallet_balance(address)
@@ -272,29 +281,25 @@ def process_wallet(account, thread_id, stop_event):
             # Tunggu 24 jam
             next_run = datetime.now() + timedelta(days=1)
             wait_seconds = 86400
-            log.info(f"[Thread {thread_id}] [blue]⏰ Siklus selesai. Klaim berikutnya pada: {next_run.strftime('%Y-%m-%d %H:%M:%S')}[/]")
+            print(f"[Thread {thread_id}] Siklus selesai. Klaim berikutnya pada: {next_run.strftime('%Y-%m-%d %H:%M:%S')}")
             
-            with console.status(f"[bold cyan][Thread {thread_id}] Menunggu {wait_seconds // 3600} jam...", spinner="earth") as status:
-                for i in range(wait_seconds):
-                    if stop_event.is_set(): break
-                    if i % 60 == 0:
-                        remaining_seconds = wait_seconds - i
-                        hours, remainder = divmod(remaining_seconds, 3600)
-                        minutes, _ = divmod(remainder, 60)
-                        status.update(f"[bold cyan][Thread {thread_id}] Menunggu... [green]{hours} jam {minutes} menit lagi[/]")
-                    time.sleep(1)
-                    
+            # Tunggu sampai waktu berikutnya atau stop event
+            for _ in range(wait_seconds):
+                if stop_event.is_set():
+                    break
+                time.sleep(1)
+                
         except Exception as e:
-            log.error(f"[Thread {thread_id}] [red]❗ Error pada wallet {account_name}: {e}[/]")
-            wallet_result["error"] = str(e)
-            time.sleep(60)  # Tunggu 1 menit sebelum retry jika terjadi error
+            print(f"[Thread {thread_id}] Error: {str(e)}")
+            time.sleep(5)
+            continue
     
     return wallet_result
 
 def run_parallel_faucet(stop_event):
-    """Menjalankan faucet secara parallel untuk semua wallet."""
+    """Menjalankan faucet secara sequential untuk semua wallet."""
     if not ACCOUNTS:
-        log.error("❌ Tidak ada wallet yang ditemukan di config.json.")
+        print("Tidak ada wallet yang ditemukan di config.json.")
         return
 
     # Kirim notifikasi awal
@@ -306,39 +311,26 @@ def run_parallel_faucet(stop_event):
 👥 Total Wallet: {len(ACCOUNTS)}
 """)
     
-    # Buat thread untuk setiap wallet
-    threads = []
     wallet_results = {}
     
-    # Proses wallet per 5 akun
-    batch_size = 5
-    for i in range(0, len(ACCOUNTS), batch_size):
-        batch = ACCOUNTS[i:i + batch_size]
-        log.info(f"[bold blue]Memulai batch {i//batch_size + 1} dengan {len(batch)} wallet...[/]")
-        
-        # Buat thread untuk batch ini
-        batch_threads = []
-        for j, account in enumerate(batch):
-            thread = threading.Thread(
-                target=lambda: wallet_results.update({Account.from_key(account["private_key"]).address: process_wallet(account, i + j + 1, stop_event)}),
-            )
-            batch_threads.append(thread)
-            thread.start()
-            time.sleep(2)  # Delay kecil antara setiap thread dalam batch
-        
-        # Tunggu semua thread dalam batch selesai
-        for thread in batch_threads:
-            thread.join()
+    # Proses wallet satu per satu
+    for i, account in enumerate(ACCOUNTS):
+        if stop_event.is_set():
+            break
             
-        # Delay antar batch
-        if i + batch_size < len(ACCOUNTS):
-            log.info(f"[blue]⏳ Menunggu 30 detik sebelum memulai batch berikutnya...[/]")
+        print(f"\nMemulai wallet {i+1}/{len(ACCOUNTS)}: {account['name']}")
+        result = process_wallet(account, i+1, stop_event)
+        wallet_results[Account.from_key(account["private_key"]).address] = result
+        
+        # Delay antar wallet
+        if i < len(ACCOUNTS) - 1:
+            print("Menunggu 30 detik sebelum memulai wallet berikutnya...")
             time.sleep(30)
     
     # Kirim rekap hasil ke Telegram
     send_telegram_summary(wallet_results)
     
-    info("Semua wallet telah selesai diproses!")
+    print("Semua wallet telah selesai diproses!")
 
 def main():
     title = Panel(
