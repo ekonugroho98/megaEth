@@ -293,30 +293,44 @@ def run_parallel_faucet(stop_event):
         print("Tidak ada wallet yang ditemukan di config.json.")
         return
 
-    # Kirim notifikasi awal
-    start_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    send_telegram_message(f"""
+    while not stop_event.is_set():
+        # Kirim notifikasi awal
+        start_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        send_telegram_message(f"""
 🚀 <b>MULAI PROSES FAUCET</b>
 
 ⏰ Waktu Mulai: {start_time}
 👥 Total Wallet: {len(ACCOUNTS)}
 """)
-    
-    wallet_results = {}
-    
-    # Proses wallet satu per satu
-    for i, account in enumerate(ACCOUNTS):
-        if stop_event.is_set():
-            break
-            
-        print(f"\nMemulai wallet {i+1}/{len(ACCOUNTS)}: {account['name']}")
-        result = process_wallet(account, i+1, stop_event)
-        wallet_results[Account.from_key(account["private_key"]).address] = result
-    
-    # Kirim rekap hasil ke Telegram
-    send_telegram_summary(wallet_results)
-    
-    print("Semua wallet telah selesai diproses!")
+        
+        wallet_results = {}
+        
+        # Proses wallet satu per satu
+        for i, account in enumerate(ACCOUNTS):
+            if stop_event.is_set():
+                break
+                
+            print(f"\nMemulai wallet {i+1}/{len(ACCOUNTS)}: {account['name']}")
+            result = process_wallet(account, i+1, stop_event)
+            wallet_results[Account.from_key(account["private_key"]).address] = result
+        
+        # Kirim rekap hasil ke Telegram
+        send_telegram_summary(wallet_results)
+        
+        print("Semua wallet telah selesai diproses!")
+        
+        # Hitung waktu untuk siklus berikutnya
+        next_run = datetime.now() + timedelta(days=1)
+        wait_seconds = 86400  # 24 jam dalam detik
+        
+        print(f"\nSiklus selesai. Siklus berikutnya akan dimulai pada: {next_run.strftime('%Y-%m-%d %H:%M:%S')}")
+        print("Menunggu 24 jam sebelum memulai siklus baru...")
+        
+        # Tunggu 24 jam atau sampai stop_event diset
+        for _ in range(wait_seconds):
+            if stop_event.is_set():
+                break
+            time.sleep(1)
 
 def main():
     title = Panel(

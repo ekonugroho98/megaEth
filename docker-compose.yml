@@ -1,19 +1,10 @@
-version: '3.8'
+version: '3'
 
 services:
-  faucet-bot:
+  bot:
     build: .
     volumes:
       - ./config.json:/app/config.json
     environment:
-      - AUTO_MODE=true
-    restart: unless-stopped
-
-  task-bot:
-    build: .
-    volumes:
-      - ./config.json:/app/config.json
-    environment:
-      - AUTO_MODE=true
-      - BOT_TYPE=task
+      - TZ=Asia/Jakarta
     restart: unless-stopped

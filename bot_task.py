@@ -28,6 +28,19 @@ def load_config():
     try:
         with open("config.json", "r") as f:
             config = json.load(f)
+        
+        # Validasi konfigurasi Telegram
+        if "telegram" not in config:
+            config["telegram"] = {
+                "enabled": False,
+                "bot_token": "",
+                "chat_id": ""
+            }
+        elif config["telegram"]["enabled"]:
+            if not config["telegram"].get("bot_token"):
+                raise ValueError("Telegram bot token tidak ditemukan dalam config")
+            if not config["telegram"].get("chat_id"):
+                raise ValueError("Telegram chat ID tidak ditemukan dalam config")
                 
         console.print("[bold green]✔️ Konfigurasi dari config.json berhasil dimuat.[/]")
         return config
@@ -37,6 +50,9 @@ def load_config():
     except json.JSONDecodeError:
         console.print("[bold red]❌ Error: Format file 'config.json' tidak valid. Pastikan format JSON sudah benar.[/]")
         sys.exit(1)
+    except ValueError as e:
+        console.print(f"[bold red]❌ Error: {str(e)}[/]")
+        sys.exit(1)
 
 config = load_config()
 ANTI_CAPTCHA_KEY = config["ANTI_CAPTCHA_KEY"]
@@ -45,15 +61,18 @@ RPC = 'https://carrot.megaeth.com/rpc'
 CHAIN = 6342
 
 # Konfigurasi Telegram
-TELEGRAM_BOT_TOKEN = "7519988044:AAFXRo2bDE99y46Fl_E_H9vbNNSW23mLvXM"
-TELEGRAM_CHAT_ID = "1433257992"
+TELEGRAM_BOT_TOKEN = config["telegram"]["bot_token"]
+TELEGRAM_CHAT_ID = config["telegram"]["chat_id"]
 
 def send_telegram_message(message):
     """Mengirim pesan ke Telegram."""
+    if not config["telegram"]["enabled"]:
+        return
+        
     try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        url = f"https://api.telegram.org/bot{config['telegram']['bot_token']}/sendMessage"
         data = {
-            "chat_id": TELEGRAM_CHAT_ID,
+            "chat_id": config["telegram"]["chat_id"],
             "text": message,
             "parse_mode": "HTML"
         }
@@ -194,47 +213,58 @@ def fetch_and_load_tokens():
         'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36'
     }
     
-    with console.status("[bold yellow]Memuat data token...[/bold yellow]", spinner="dots"):
-        try:
-            resp = requests.get(API_URL, headers=headers, timeout=10)
-            resp.raise_for_status()
-            markets = resp.json()
-            
-            # Proses data token dari response
-            for market in markets:
-                # Proses base token
-                base_token = market.get('baseToken', {})
-                if base_token:
-                    symbol = base_token.get('symbol', '').upper().strip()
-                    if symbol:
-                        addr = Web3.to_checksum_address(base_token['address'])
-                        TOKENS[symbol] = {
-                            "address": addr,
-                            "decimals": base_token.get('decimals', 18)
-                        }
-                
-                # Proses quote token
-                quote_token = market.get('quoteToken', {})
-                if quote_token:
-                    symbol = quote_token.get('symbol', '').upper().strip()
-                    if symbol:
-                        addr = Web3.to_checksum_address(quote_token['address'])
-                        TOKENS[symbol] = {
-                            "address": addr,
-                            "decimals": quote_token.get('decimals', 18)
-                        }
-            
-            # Tambahkan ETH dan WETH
-            TOKENS["ETH"] = {"address": None, "decimals": 18}
-            TOKENS["WETH"] = {"address": WETH_ADDR, "decimals": 18}
-            
-        except Exception as e:
-            error(f"Gagal memuat data token: {e}")
-            # Tetap tambahkan ETH dan WETH meskipun gagal
-            TOKENS["ETH"] = {"address": None, "decimals": 18}
-            TOKENS["WETH"] = {"address": WETH_ADDR, "decimals": 18}
+    max_retries = 3
+    retry_delay = 5
     
-    success(f"Berhasil memuat {len(TOKENS)} token.")
+    for attempt in range(max_retries):
+        try:
+            with console.status(f"[bold yellow]Memuat data token (Percobaan {attempt + 1}/{max_retries})...[/bold yellow]", spinner="dots"):
+                resp = requests.get(API_URL, headers=headers, timeout=30)  # Increased timeout
+                resp.raise_for_status()
+                markets = resp.json()
+                
+                # Proses data token dari response
+                for market in markets:
+                    # Proses base token
+                    base_token = market.get('baseToken', {})
+                    if base_token:
+                        symbol = base_token.get('symbol', '').upper().strip()
+                        if symbol:
+                            addr = Web3.to_checksum_address(base_token['address'])
+                            TOKENS[symbol] = {
+                                "address": addr,
+                                "decimals": base_token.get('decimals', 18)
+                            }
+                    
+                    # Proses quote token
+                    quote_token = market.get('quoteToken', {})
+                    if quote_token:
+                        symbol = quote_token.get('symbol', '').upper().strip()
+                        if symbol:
+                            addr = Web3.to_checksum_address(quote_token['address'])
+                            TOKENS[symbol] = {
+                                "address": addr,
+                                "decimals": quote_token.get('decimals', 18)
+                            }
+                
+                # Tambahkan ETH dan WETH
+                TOKENS["ETH"] = {"address": None, "decimals": 18}
+                TOKENS["WETH"] = {"address": WETH_ADDR, "decimals": 18}
+                
+                success(f"Berhasil memuat {len(TOKENS)} token.")
+                return
+                
+        except requests.exceptions.RequestException as e:
+            error(f"Gagal memuat data token (Percobaan {attempt + 1}/{max_retries}): {str(e)}")
+            if attempt < max_retries - 1:
+                warning(f"Mencoba ulang dalam {retry_delay} detik...")
+                time.sleep(retry_delay)
+            else:
+                warning("Menggunakan data token minimal (ETH dan WETH saja)")
+                # Tetap tambahkan ETH dan WETH meskipun gagal
+                TOKENS["ETH"] = {"address": None, "decimals": 18}
+                TOKENS["WETH"] = {"address": WETH_ADDR, "decimals": 18}
+                success("Berhasil memuat token minimal (ETH dan WETH).")
 
 def select_token_from_list(prompt_title, exclude_symbols=None):
     if exclude_symbols is None: exclude_symbols = []
@@ -526,27 +556,83 @@ def do_swap(src_sym, dst_sym, amt, mass_mode=False):
 
 @retry_on_failure
 def add_liquidity(token_sym, eth_wei):
-    token_data = TOKENS[token_sym]; token_addr = token_data['address']; deadline = int(time.time()) + 120
+    """Menambahkan likuiditas ke pool."""
+    if token_sym not in TOKENS:
+        raise ValueError(f"Token {token_sym} tidak ditemukan")
+    
+    token_addr = TOKENS[token_sym]["address"]
+    if token_addr == WETH_ADDR:
+        raise ValueError("Tidak dapat menambahkan likuiditas ETH/WETH - gunakan token lain")
+    
+    # Validasi jumlah minimum ETH
+    MIN_ETH = w3.to_wei(0.001, 'ether')  # Minimum 0.001 ETH
+    if eth_wei < MIN_ETH:
+        raise ValueError(f"Jumlah ETH terlalu kecil. Minimum: {w3.from_wei(MIN_ETH, 'ether')} ETH")
+    
     info(f"Mencoba menambah likuiditas untuk {w3.from_wei(eth_wei, 'ether')} ETH dan {token_sym}...")
+    
     try:
-        _, amounts = router.functions.getAmountsOut(eth_wei, [WETH_ADDR, token_addr]).call(); token_wei = amounts
-    except Exception as e: error(f"Tidak dapat menghitung jumlah token. Mungkin pool belum ada. Error: {e}"); return None
-    info(f"Dibutuhkan [bold]{w3.from_wei(token_wei, 'ether')} {token_sym}[/bold] untuk dipasangkan dengan {w3.from_wei(eth_wei, 'ether')} ETH.")
-    token_contract = w3.eth.contract(address=token_addr, abi=ERC20_ABI); token_balance = token_contract.functions.balanceOf(A).call()
-    if token_balance < token_wei: error(f"Saldo {token_sym} tidak cukup. Butuh: {w3.from_wei(token_wei, 'ether')}, Punya: {w3.from_wei(token_balance, 'ether')}"); return None
-    if not ensure_approve(token_addr, token_wei): return None
-    token_min = int(token_wei * (1 - SLIPPAGE)); eth_min = int(eth_wei * (1 - SLIPPAGE))
-    fn = router.functions.addLiquidityETH(token_addr, token_wei, token_min, eth_min, A, deadline)
-    tx_params = {'from': A, 'value': eth_wei, 'nonce': w3.eth.get_transaction_count(A), 'gas': GAS_SW, 'gasPrice': GAS_P}
-    tx = fn.build_transaction(tx_params)
-    if not chk_native(tx['gas'] * tx['gasPrice'] + tx.get('value', 0)): return None
-    sig = w3.eth.account.sign_transaction(tx, PK); tx_hash = w3.eth.send_raw_transaction(sig.raw_transaction)
-    rec = wait_for_tx(tx_hash, "Menambah likuiditas...")
-    if rec and rec.status == 1:
-        success(f"Likuiditas berhasil ditambah! Tx Hash: [yellow]{tx_hash.hex()}[/yellow]")
-        return tx_hash.hex()
-    else:
-        error(f"Gagal menambah likuiditas. Tx Hash: [yellow]{tx_hash.hex()}[/yellow]")
+        # Get token contract
+        token_contract = w3.eth.contract(address=token_addr, abi=ERC20_ABI)
+        
+        # Calculate token amount based on current price
+        token_balance = token_contract.functions.balanceOf(A).call()
+        if token_balance == 0:
+            raise ValueError(f"Tidak memiliki token {token_sym}")
+            
+        info(f"Saldo token {token_sym}: {w3.from_wei(token_balance, 'ether')}")
+        
+        # Validasi jumlah minimum token
+        MIN_TOKEN = w3.to_wei(0.001, 'ether')  # Minimum 0.001 token
+        if token_balance < MIN_TOKEN:
+            raise ValueError(f"Jumlah token terlalu kecil. Minimum: {w3.from_wei(MIN_TOKEN, 'ether')} {token_sym}")
+        
+        # Ensure token is approved
+        if not ensure_approve(token_addr, token_balance):
+            return None
+            
+        # Calculate minimum amounts with slippage
+        token_min = int(token_balance * (1 - SLIPPAGE))
+        eth_min = int(eth_wei * (1 - SLIPPAGE))
+        
+        info(f"Minimum token: {w3.from_wei(token_min, 'ether')} {token_sym}")
+        info(f"Minimum ETH: {w3.from_wei(eth_min, 'ether')} ETH")
+        
+        # Add liquidity
+        deadline = int(time.time()) + 300  # 5 minutes
+        tx = router.functions.addLiquidityETH(
+            token_addr,
+            token_balance,
+            token_min,  # Use calculated minimum
+            eth_min,    # Use calculated minimum
+            A,
+            deadline
+        ).build_transaction({
+            'from': A,
+            'value': eth_wei,
+            'gas': GAS_SW,  # Use swap gas limit instead of approval
+            'gasPrice': GAS_P,
+            'nonce': w3.eth.get_transaction_count(A)
+        })
+        
+        if not chk_native(tx['gas'] * tx['gasPrice'] + tx.get('value', 0)):
+            return None
+            
+        sig = w3.eth.account.sign_transaction(tx, PK)
+        tx_hash = w3.eth.send_raw_transaction(sig.raw_transaction)
+        
+        rec = wait_for_tx(tx_hash, "Menunggu konfirmasi penambahan likuiditas...")
+        if rec and rec.status == 1:
+            success(f"✅ Likuiditas berhasil ditambahkan! Tx: {tx_hash.hex()}")
+            return tx_hash.hex()
+        else:
+            error(f"❌ Gagal menambahkan likuiditas. Status: {rec.status if rec else 'No receipt'}")
+            if rec and rec.status == 0:
+                error("Transaksi gagal di level smart contract. Mungkin jumlah terlalu kecil atau pool belum ada.")
+            return None
+            
+    except Exception as e:
+        error(f"Error saat menambahkan likuiditas: {str(e)}")
         return None
 
 @retry_on_failure
@@ -576,9 +662,144 @@ def display_main_menu():
 """
     console.print(Panel(menu_text, title="[bold]PILIH AKSI[/bold]", border_style="cyan", expand=False))
 
+def main_add_liquidity():
+    global A, PK, PROXY
+    info("Memulai Tambah Likuiditas (Pasangan ETH)...")
+    
+    # Pilih token
+    while True:
+        token_sym = select_token_from_list(
+            "Pilih Token yang Akan Dipasangkan dengan ETH",
+            exclude_symbols=['ETH', 'WETH']
+        )
+        if token_sym is None: 
+            info("Operasi tambah likuiditas dibatalkan.")
+            return
+        break
+    
+    # Input jumlah ETH dengan validasi
+    while True:
+        try:
+            eth_amt_str = prompt(f"Jumlah ETH yang akan ditambahkan untuk pasangan {token_sym} (minimal 0.001 ETH): ").strip()
+            eth_wei = w3.to_wei(float(eth_amt_str), 'ether')
+            
+            # Validasi minimum ETH
+            MIN_ETH = w3.to_wei(0.001, 'ether')
+            if eth_wei < MIN_ETH:
+                error(f"Jumlah ETH terlalu kecil. Minimum: {w3.from_wei(MIN_ETH, 'ether')} ETH")
+                continue
+                
+            break
+        except ValueError:
+            error("Jumlah ETH tidak valid. Masukkan angka yang valid.")
+            continue
+    
+    # Pilih wallet
+    selected_wallets, selected_pks, selected_proxies = select_wallets()
+    
+    # Proses setiap wallet
+    for i, (acct, pk, proxy) in enumerate(zip(selected_wallets, selected_pks, selected_proxies)):
+        A, PK, PROXY = acct.address, pk, proxy
+        console.print(Rule(f"Memproses Dompet {i+1}/{len(selected_wallets)}: {A}", style="bold green"))
+        
+        # Cek saldo token
+        token_contract = w3.eth.contract(address=TOKENS[token_sym]["address"], abi=ERC20_ABI)
+        token_balance = token_contract.functions.balanceOf(A).call()
+        token_decimals = TOKENS[token_sym].get('decimals', 18)
+        
+        # Convert to human readable format
+        human_balance = token_balance / (10 ** token_decimals)
+        MIN_TOKEN = 0.001  # Minimum in human readable format
+        
+        info(f"Saldo {token_sym}: {human_balance}")
+        info(f"Minimum yang dibutuhkan: {MIN_TOKEN} {token_sym}")
+        
+        if human_balance < MIN_TOKEN:
+            error(f"Saldo {token_sym} tidak cukup. Minimum: {MIN_TOKEN} {token_sym}")
+            continue
+            
+        # Coba tambah likuiditas
+        tx_hash = add_liquidity(token_sym, eth_wei)
+        if tx_hash:
+            success(f"Berhasil menambahkan likuiditas untuk wallet {A}")
+        else:
+            error(f"Gagal menambahkan likuiditas untuk wallet {A}")
+
+def main_swap_all_to_eth():
+    global A, PK, PROXY
+    info("Memulai Swap SEMUA Token ke ETH...")
+    selected_wallets, selected_pks, selected_proxies = select_wallets()
+    for i, (acct, pk, proxy) in enumerate(zip(selected_wallets, selected_pks, selected_proxies)):
+        A, PK, PROXY = acct.address, pk, proxy
+        console.print(Rule(f"Memproses Dompet {i+1}/{len(selected_wallets)}: {A}", style="bold green"))
+        for symbol, token_data in TOKENS.items():
+            if symbol in ["ETH", "WETH"] or not token_data.get("address"): continue
+            try:
+                contract = w3.eth.contract(address=token_data["address"], abi=ERC20_ABI)
+                balance = contract.functions.balanceOf(A).call()
+                if balance > 0:
+                    human_bal = balance / (10**token_data.get('decimals', 18))
+                    info(f"Menemukan {human_bal:.6f} [bold]{symbol}[/bold]. Melakukan swap ke ETH...")
+                    do_swap(symbol, "ETH", balance, mass_mode=True)
+                    time.sleep(2)
+            except Exception as e: error(f"Tidak dapat memproses {symbol}: {e}")
+
+def main_toggle_mass_swap():
+    global mass_swap_enabled
+    mass_swap_enabled = not mass_swap_enabled
+    state = "[bold green]ON[/bold green]" if mass_swap_enabled else "[bold red]OFF[/bold red]"
+    success(f"Mode Mass Swap sekarang {state}")
+    warning("Mode Mass Swap belum diimplementasikan di versi ini.")
+
+def main_manual_swap():
+    global A, PK, PROXY
+    info("Memulai Swap Manual...")
+    s = select_token_from_list("Pilih Token Sumber (FROM)")
+    if s is None: info("Swap dibatalkan."); return
+    d = select_token_from_list("Pilih Token Tujuan (TO)", exclude_symbols=[s])
+    if d is None: info("Swap dibatalkan."); return
+    try:
+        raw_amt = float(prompt(f"Jumlah {s} yang akan di-swap: ").strip())
+        repeat = int(prompt("Ulangi berapa kali? (default 1): ") or 1)
+        delay = float(prompt("Jeda antar swap (detik, default 1): ") or 1)
+        amount_wei = int(raw_amt * (10 ** TOKENS[s]['decimals']))
+    except ValueError: error("Input numerik tidak valid."); return
+    selected_wallets, selected_pks, selected_proxies = select_wallets()
+    for i, (acct, pk, proxy) in enumerate(zip(selected_wallets, selected_pks, selected_proxies)):
+        A, PK, PROXY = acct.address, pk, proxy
+        console.print(Rule(f"Memproses Dompet {i+1}/{len(selected_wallets)}: {A}", style="bold green"))
+        for j in range(repeat):
+            info(f"Eksekusi swap #{j+1}/{repeat}...")
+            do_swap(s, d, amount_wei)
+            if j < repeat - 1: info(f"Menunggu {delay} detik..."); time.sleep(delay)
+
 def main():
     fetch_and_load_tokens()
-    main_auto_all_tasks()
+    while True:
+        clear_screen()
+        console.print(Rule("[bold magenta]Mega Testnet Trading Bot v2.2 (Task Mode)[/bold magenta]"))
+        display_wallet_summary()
+        display_main_menu()
+        choice = prompt("Masukkan pilihan Anda (1-6): ")
+        
+        actions = {
+            '1': main_manual_swap,
+            '2': main_swap_all_to_eth,
+            '3': main_add_liquidity,
+            '4': main_toggle_mass_swap,
+            '5': main_auto_all_tasks,
+        }
+
+        if choice in actions:
+            actions[choice]()
+        elif choice == '6':
+            info("Keluar dari bot. Sampai jumpa!")
+            break
+        else:
+            error("Pilihan tidak valid, silakan coba lagi.")
+        
+        if choice != '6':
+            prompt("\nOperasi selesai. Tekan Enter untuk kembali ke menu utama...")
 
 if __name__ == "__main__":
     main()

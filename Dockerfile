@@ -14,8 +14,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the rest of the application
 COPY . .
 
-# Create logs directory
-RUN mkdir -p logs
-
-# Run the application
-CMD ["python3", "run_bots.py"] 
+# Run the bot
+CMD ["python", "bot_task.py"] 
