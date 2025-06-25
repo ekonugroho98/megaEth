@@ -8,6 +8,7 @@ from web3 import Web3
 from datetime import datetime, timedelta
 from rich.console import Console
 from rich.panel import Panel
+from rich.text import Text
 from rich.logging import RichHandler
 
 console = Console()
@@ -40,6 +41,10 @@ TURNSTILE_PAGE_URL = "https://testnet.megaeth.com/"
 MEGAETH_API_URL = "https://carrot.megaeth.com/claim"
 RPC_URL = "https://carrot.megaeth.com/rpc"
 
+# URL untuk Anti-Captcha
+ANTICAPTCHA_CREATE_TASK_URL = "https://api.anti-captcha.com/createTask"
+ANTICAPTCHA_GET_RESULT_URL = "https://api.anti-captcha.com/getTaskResult"
+
 def load_proxies(filename="proxies.txt"):
     """Memuat daftar proxy dari file."""
     try:
@@ -65,30 +70,66 @@ def load_keys(filename="private_keys.txt"):
         return []
 
 def submit_captcha(session, thread_id):
-    params = {
-        "key": APIKEY, "method": "turnstile", "sitekey": TURNSTILE_SITEKEY,
-        "pageurl": TURNSTILE_PAGE_URL, "json": "1"
+    """Membuat task penyelesaian Turnstile di Anti-Captcha."""
+    log.info(f"[Thread {thread_id}] [yellow]📤 Membuat task di Anti-Captcha...[/]")
+    payload = {
+        "clientKey": APIKEY,
+        "task": {
+            "type": "TurnstileTaskProxyless",
+            "websiteURL": TURNSTILE_PAGE_URL,
+            "websiteKey": TURNSTILE_SITEKEY
+        }
     }
-    log.info(f"[Thread {thread_id}] [yellow]📤 Mengirim permintaan CAPTCHA...[/]")
-    res = session.post("http://api.multibot.in/in.php", files={k: (None, v) for k, v in params.items()}).json()
-    if res["status"] != 1:
-        raise Exception(f"Gagal submit CAPTCHA: {res}")
-    log.info(f"[Thread {thread_id}] [green]✔️ Permintaan CAPTCHA diterima. ID: {res['request']}[/]")
-    return res["request"]
+    try:
+        res = session.post(ANTICAPTCHA_CREATE_TASK_URL, json=payload, timeout=20).json()
+        if res.get("errorId") != 0:
+            raise Exception(f"Gagal membuat task - {res.get('errorCode')}: {res.get('errorDescription')}")
+        
+        task_id = res.get("taskId")
+        if not task_id:
+            raise Exception("Gagal mendapatkan taskId dari response Anti-Captcha.")
+            
+        log.info(f"[Thread {thread_id}] [green]✔️ Task Anti-Captcha diterima. ID: {task_id}[/]")
+        return task_id
+    except Exception as e:
+        raise Exception(f"Error saat menghubungi Anti-Captcha: {e}")
 
-def get_captcha_result(session, captcha_id, thread_id):
-    with console.status(f"[bold yellow][Thread {thread_id}] ⏳ Menunggu hasil CAPTCHA...", spinner="dots") as status:
-        for _ in range(20):
+def get_captcha_result(session, task_id, thread_id):
+    """Mendapatkan hasil penyelesaian CAPTCHA dari Anti-Captcha."""
+    payload = {
+        "clientKey": APIKEY,
+        "taskId": task_id
+    }
+    with console.status(f"[bold yellow][Thread {thread_id}] ⏳ Menunggu hasil Anti-Captcha...", spinner="dots") as status:
+        # Timeout 120 detik (40 * 3 detik)
+        for _ in range(40):
             time.sleep(3)
-            res = session.get("http://api.multibot.in/res.php", params={
-                "key": APIKEY, "action": "get", "id": captcha_id, "json": "1"
-            }).json()
-            if res["status"] == 1:
-                log.info(f"[Thread {thread_id}] [green]✅ CAPTCHA berhasil diselesaikan![/]")
-                return res["request"]
-            elif res["request"] != "CAPCHA_NOT_READY":
-                raise Exception(f"Error CAPTCHA: {res}")
-        raise Exception("Timeout CAPTCHA.")
+            try:
+                res = session.post(ANTICAPTCHA_GET_RESULT_URL, json=payload, timeout=20).json()
+                
+                if res.get("errorId") != 0:
+                    raise Exception(f"Gagal mendapatkan hasil - {res.get('errorCode')}: {res.get('errorDescription')}")
+
+                status_val = res.get("status")
+                if status_val == "ready":
+                    log.info(f"[Thread {thread_id}] [green]✅ CAPTCHA berhasil diselesaikan![/]")
+                    token = res.get("solution", {}).get("token")
+                    if not token:
+                        raise Exception("Token tidak ditemukan di response Anti-Captcha.")
+                    return token
+                
+                if status_val == "processing":
+                    continue # Lanjutkan menunggu
+
+                # Status lain tidak diharapkan
+                raise Exception(f"Status tidak diketahui dari Anti-Captcha: {status_val}")
+
+            except Exception as e:
+                log.error(f"[Thread {thread_id}] [red]Error saat polling hasil: {e}[/]")
+                # Lanjutkan mencoba sampai timeout
+                continue
+
+    raise Exception("Timeout saat menunggu hasil CAPTCHA dari Anti-Captcha.")
 
 def claim(session, addr, token, thread_id):
     log.info(f"[Thread {thread_id}] [cyan]🚰 Mencoba melakukan klaim untuk wallet {addr[:10]}...[/]")
@@ -183,9 +224,7 @@ def run_faucet_for_all_keys(stop_event):
 
 def main():
     title = Panel(
-        Text("MEGAETH FAUCET BOT", justify="center", style="bold magenta"),
-        title="[bold green]By: Bény G.[/]",
-        subtitle="[cyan]v3.0 - Single Mode[/]"
+        Text("MEGAETH FAUCET BOT", justify="center", style="bold green"),
     )
     console.print(title)
 
