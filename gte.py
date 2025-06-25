@@ -83,54 +83,29 @@ TOKENS = {}
 
 def fetch_and_load_tokens():
     global TOKENS
-    API_URL = "https://api-testnet.gte.xyz/v1/markets?sortBy=volume&limit=100"
-    headers = {
-        'accept': 'application/json, text/plain, */*',
-        'origin': 'https://testnet.gte.xyz',
-        'referer': 'https://testnet.gte.xyz/',
-        'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36'
-    }
-    
+    API_URL = "https://gte-api.mobula.io/api/1/market/blockchain/pairs?blockchain=mega+testnet&factory=gte&excludeBonded=true&filters=type%3Auniswap-v2&limit=100"
     with console.status("[bold yellow]Memuat data token...[/bold yellow]", spinner="dots"):
         try:
-            resp = requests.get(API_URL, headers=headers, timeout=10)
-            resp.raise_for_status()
-            markets = resp.json()
-            
-            # Proses data token dari response
-            for market in markets:
-                # Proses base token
-                base_token = market.get('baseToken', {})
-                if base_token:
-                    symbol = base_token.get('symbol', '').upper().strip()
-                    if symbol:
-                        addr = Web3.to_checksum_address(base_token['address'])
-                        TOKENS[symbol] = {
-                            "address": addr,
-                            "decimals": base_token.get('decimals', 18)
-                        }
-                
-                # Proses quote token
-                quote_token = market.get('quoteToken', {})
-                if quote_token:
-                    symbol = quote_token.get('symbol', '').upper().strip()
-                    if symbol:
-                        addr = Web3.to_checksum_address(quote_token['address'])
-                        TOKENS[symbol] = {
-                            "address": addr,
-                            "decimals": quote_token.get('decimals', 18)
-                        }
-            
-            # Tambahkan ETH dan WETH
+            resp = requests.get(API_URL, timeout=10); resp.raise_for_status()
+            j = resp.json()
+            pairs_list = []
+            def recurse(obj):
+                if isinstance(obj, dict):
+                    if "token0" in obj and "token1" in obj: pairs_list.append(obj)
+                    for v in obj.values(): recurse(v)
+                elif isinstance(obj, list):
+                    for item in obj: recurse(item)
+            recurse(j)
+            for p in pairs_list:
+                for side in ("token0", "token1"):
+                    t = p[side]
+                    sym = t.get("symbol", "").upper().strip()
+                    if not sym: continue
+                    addr = Web3.to_checksum_address(t["address"])
+                    TOKENS[sym] = {"address": addr, "decimals": t.get("decimals", 18)}
             TOKENS["ETH"] = {"address": None, "decimals": 18}
             TOKENS["WETH"] = {"address": WETH_ADDR, "decimals": 18}
-            
-        except Exception as e:
-            error(f"Gagal memuat data token: {e}")
-            # Tetap tambahkan ETH dan WETH meskipun gagal
-            TOKENS["ETH"] = {"address": None, "decimals": 18}
-            TOKENS["WETH"] = {"address": WETH_ADDR, "decimals": 18}
-    
+        except Exception as e: error(f"Gagal memuat data token: {e}"); exit()
     success(f"Berhasil memuat {len(TOKENS)} token.")
 
 def select_token_from_list(prompt_title, exclude_symbols=None):
