@@ -36,15 +36,15 @@ w3 = Web3(Web3.HTTPProvider(RPC))
 def load_private_keys():
     pk_list = []
     try:
-        with open("privatekey.txt", "r") as f:
+        with open("private_keys.txt", "r") as f:
             keys = [line.strip() for line in f if line.strip()]
             if keys:
-                info("Memuat private key dari [bold]privatekey.txt[/bold]")
+                info("Memuat private key dari [bold]private_keys.txt[/bold]")
                 pk_list.extend(keys)
     except FileNotFoundError:
         pass
     if not pk_list:
-        warning("privatekey.txt tidak ditemukan atau kosong. Mencoba dari environment variables.")
+        warning("private_keys.txt tidak ditemukan atau kosong. Mencoba dari environment variables.")
         load_dotenv()
         raw_keys = os.getenv("PRIVATE_KEYS") or ""
         single_key = os.getenv("PRIVATE_KEY") or ""
@@ -52,7 +52,7 @@ def load_private_keys():
         if single_key and single_key not in pk_list: pk_list.append(single_key)
         if pk_list: info("Memuat private key dari environment variables.")
     if not pk_list:
-        error("Tidak ada private key yang ditemukan. Harap sediakan di `privatekey.txt` atau di environment variables.")
+        error("Tidak ada private key yang ditemukan. Harap sediakan di `private_keys.txt` atau di environment variables.")
         exit()
     return pk_list
 

@@ -1,3 +1,5 @@
 private_keys.txt
 __pycache__/
 venv/
+captcha_key.txt
+proxies.txt
