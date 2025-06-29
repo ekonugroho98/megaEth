@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  # --- Layanan untuk Bot Auto Swap & Liquidity (auto_swap_liquidity.py) ---
+  auto-swap-bot:
+    build: .
+    container_name: gte-auto-swap-bot
+    restart: unless-stopped
+    environment:
+      # --- KONFIGURASI MODE KONTINYU ---
+      # Set ke 'true' untuk menjalankan bot setiap 24 jam secara otomatis
+      - CONTINUOUS_MODE=true
+      
+      # --- KONFIGURASI RANDOM AMOUNT ---
+      # Range jumlah ETH untuk swap (anti-bot detection)
+      - SWAP_AMOUNT_MIN=0.0001
+      - SWAP_AMOUNT_MAX=0.002
+      
+      # Range jumlah ETH untuk tambah likuiditas
+      - LIQUIDITY_AMOUNT_MIN=0.0001
+      - LIQUIDITY_AMOUNT_MAX=0.002
+      
+      # --- KONFIGURASI WALLET ---
+      # Target dompet: 'all' untuk semua dompet, atau nomor indeks (misal: '0')
+      - WALLET_TARGET=all
+      
+      # --- KONFIGURASI DELAY ---
+      # Jeda antar dompet (detik)
+      - DELAY_BETWEEN_WALLETS=10
+      # Jeda antara swap dan tambah likuiditas (detik)
+      - DELAY_BETWEEN_OPERATIONS=5
+    
+    volumes:
+      # Mount file-file penting dari komputer Anda ke dalam container
+      - ./private_keys.txt:/app/private_keys.txt
+      - ./proxies.txt:/app/proxies.txt
+      - ./.env:/app/.env
+    command: ["python3", "auto_swap_liquidity.py"]
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # --- Layanan untuk Bot Faucet Claimer (faucet.py) ---
+  faucet-claimer:
+    build: .
+    container_name: gte-faucet-claimer
+    restart: unless-stopped
+    command: ["python3", "faucet.py"]
+    volumes:
+      - ./private_keys.txt:/app/private_keys.txt
+      - ./proxies.txt:/app/proxies.txt
+      - ./captcha_key.txt:/app/captcha_key.txt
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3" 

@@ -195,8 +195,29 @@ def process_key_looping(private_key, proxy, thread_id, stop_event):
                 if stop_event.is_set(): break
                 time.sleep(1)
 
+def run_faucet_for_all_keys_sequential(stop_event):
+    """Versi sequential - memproses wallet satu per satu"""
+    log.info("Memulai bot faucet (SEQUENTIAL MODE)...")
+    keys = load_keys()
+    if not keys:
+        log.error("File private_keys.txt kosong atau tidak ditemukan. Bot akan berhenti.")
+        return
+    
+    proxies = load_proxies()
+    if proxies and len(keys) > len(proxies):
+        log.warning(f"Peringatan: Jumlah kunci ({len(keys)}) lebih banyak dari jumlah proxy ({len(proxies)}). Beberapa kunci akan dijalankan tanpa proxy.")
+
+    for i, key in enumerate(keys):
+        if stop_event.is_set():
+            break
+            
+        proxy = proxies[i] if proxies and i < len(proxies) else None
+        log.info(f"Memproses wallet {i+1}/{len(keys)}")
+        process_key_looping(key, proxy, i + 1, stop_event)
+
 def run_faucet_for_all_keys(stop_event):
-    log.info("Memulai bot faucet...")
+    """Versi parallel - memproses semua wallet bersamaan"""
+    log.info("Memulai bot faucet (PARALLEL MODE)...")
     keys = load_keys()
     if not keys:
         log.error("File private_keys.txt kosong atau tidak ditemukan. Bot akan berhenti.")
@@ -221,10 +242,30 @@ def main():
     )
     console.print(title)
 
+    # Pilihan mode
+    console.print("\n[bold cyan]Pilih mode operasi:[/bold cyan]")
+    console.print("1. [bold green]PARALLEL[/bold green] - Semua wallet berjalan bersamaan (default)")
+    console.print("2. [bold yellow]SEQUENTIAL[/bold yellow] - Wallet diproses satu per satu")
+    
+    try:
+        choice = input("\nMasukkan pilihan (1 atau 2, default=1): ").strip()
+        if choice == "2":
+            sequential_mode = True
+            console.print("[bold yellow]Mode SEQUENTIAL dipilih[/bold yellow]")
+        else:
+            sequential_mode = False
+            console.print("[bold green]Mode PARALLEL dipilih[/bold green]")
+    except (KeyboardInterrupt, EOFError):
+        sequential_mode = False
+        console.print("[bold green]Mode PARALLEL dipilih (default)[/bold green]")
+
     stop_event = threading.Event()
 
     try:
-        run_faucet_for_all_keys(stop_event)
+        if sequential_mode:
+            run_faucet_for_all_keys_sequential(stop_event)
+        else:
+            run_faucet_for_all_keys(stop_event)
     except (KeyboardInterrupt, EOFError):
         log.warning("\nProgram dihentikan oleh pengguna. Mengirim sinyal berhenti ke semua thread...")
         stop_event.set()
