@@ -100,34 +100,35 @@ def get_captcha_result(session, task_id, short_addr):
         "clientKey": APIKEY,
         "taskId": task_id
     }
-    with console.status(f"[{short_addr}] Menunggu hasil Anti-Captcha...", spinner="dots") as status:
-        # Timeout 120 detik (40 * 3 detik)
-        for _ in range(40):
-            time.sleep(3)
-            try:
-                res = session.post(ANTICAPTCHA_GET_RESULT_URL, json=payload, timeout=20).json()
-                
-                if res.get("errorId") != 0:
-                    raise Exception(f"Gagal mendapatkan hasil - {res.get('errorCode')}: {res.get('errorDescription')}")
+    
+    log.info(f"[{short_addr}] Menunggu hasil Anti-Captcha...")
+    # Timeout 120 detik (40 * 3 detik)
+    for _ in range(40):
+        time.sleep(3)
+        try:
+            res = session.post(ANTICAPTCHA_GET_RESULT_URL, json=payload, timeout=20).json()
+            
+            if res.get("errorId") != 0:
+                raise Exception(f"Gagal mendapatkan hasil - {res.get('errorCode')}: {res.get('errorDescription')}")
 
-                status_val = res.get("status")
-                if status_val == "ready":
-                    log.info(f"[{short_addr}] CAPTCHA berhasil diselesaikan.")
-                    token = res.get("solution", {}).get("token")
-                    if not token:
-                        raise Exception("Token tidak ditemukan di response Anti-Captcha.")
-                    return token
-                
-                if status_val == "processing":
-                    continue # Lanjutkan menunggu
+            status_val = res.get("status")
+            if status_val == "ready":
+                log.info(f"[{short_addr}] CAPTCHA berhasil diselesaikan.")
+                token = res.get("solution", {}).get("token")
+                if not token:
+                    raise Exception("Token tidak ditemukan di response Anti-Captcha.")
+                return token
+            
+            if status_val == "processing":
+                continue # Lanjutkan menunggu
 
-                # Status lain tidak diharapkan
-                raise Exception(f"Status tidak diketahui dari Anti-Captcha: {status_val}")
+            # Status lain tidak diharapkan
+            raise Exception(f"Status tidak diketahui dari Anti-Captcha: {status_val}")
 
-            except Exception as e:
-                log.error(f"[{short_addr}] Error saat polling hasil: {e}")
-                # Lanjutkan mencoba sampai timeout
-                continue
+        except Exception as e:
+            log.error(f"[{short_addr}] Error saat polling hasil: {e}")
+            # Lanjutkan mencoba sampai timeout
+            continue
 
     raise Exception("Timeout saat menunggu hasil CAPTCHA dari Anti-Captcha.")
 
@@ -190,10 +191,11 @@ def process_key_looping(private_key, proxy, thread_id, stop_event):
         wait_seconds = 86400
         log.info(f"[{short_addr}] Siklus selesai. Menunggu 24 jam untuk klaim berikutnya.")
 
-        with console.status(f"[{short_addr}] Menunggu siklus berikutnya...", spinner="earth") as status:
-            for i in range(wait_seconds):
-                if stop_event.is_set(): break
-                time.sleep(1)
+        # Gunakan pendekatan sederhana tanpa console.status untuk menghindari konflik thread
+        for i in range(wait_seconds):
+            if stop_event.is_set(): 
+                break
+            time.sleep(1)
 
 def run_faucet_for_all_keys_sequential(stop_event):
     """Versi sequential - memproses wallet satu per satu"""
@@ -207,13 +209,63 @@ def run_faucet_for_all_keys_sequential(stop_event):
     if proxies and len(keys) > len(proxies):
         log.warning(f"Peringatan: Jumlah kunci ({len(keys)}) lebih banyak dari jumlah proxy ({len(proxies)}). Beberapa kunci akan dijalankan tanpa proxy.")
 
-    for i, key in enumerate(keys):
-        if stop_event.is_set():
-            break
+    cycle_count = 0
+    while not stop_event.is_set():
+        cycle_count += 1
+        log.info(f"=== MEMULAI SIKLUS {cycle_count} ===")
+        
+        successful_wallets = 0
+        failed_wallets = 0
+        
+        for i, key in enumerate(keys):
+            if stop_event.is_set():
+                log.info("Sinyal berhenti diterima. Menghentikan proses...")
+                break
+                
+            proxy = proxies[i] if proxies and i < len(proxies) else None
+            log.info(f"Memproses wallet {i+1}/{len(keys)}")
             
-        proxy = proxies[i] if proxies and i < len(proxies) else None
-        log.info(f"Memproses wallet {i+1}/{len(keys)}")
-        process_key_looping(key, proxy, i + 1, stop_event)
+            # Proses satu kali klaim untuk wallet ini
+            account = Account.from_key(key)
+            address = account.address
+            short_addr = f"{address[:6]}..{address[-4:]}"
+            proxy_display = proxy.split('@')[-1] if proxy else "Tidak ada"
+            log.info(f"Thread {i+1}: Memulai wallet {short_addr} | Proxy: {proxy_display}")
+            
+            session = requests.Session()
+            if proxy:
+                session.proxies.update({"http": f"http://{proxy}", "https": f"http://{proxy}"})
+            
+            try:
+                check_balance(address, proxy, short_addr)
+                cap_id = submit_captcha(session, short_addr)
+                cap_token = get_captcha_result(session, cap_id, short_addr)
+                if claim(session, address, cap_token, short_addr):
+                    successful_wallets += 1
+                    log.info(f"[{short_addr}] Wallet {i+1} berhasil diproses.")
+                else:
+                    failed_wallets += 1
+                    log.warning(f"[{short_addr}] Wallet {i+1} gagal diproses.")
+            except Exception as e:
+                failed_wallets += 1
+                log.error(f"[{short_addr}] Error pada siklus: {e}")
+            finally:
+                session.close()
+            
+            # Jeda antar wallet (opsional)
+            if i < len(keys) - 1 and not stop_event.is_set():
+                log.info(f"Menunggu 5 detik sebelum lanjut ke wallet berikutnya...")
+                time.sleep(5)
+        
+        # Setelah semua wallet diproses, tunggu 24 jam sebelum siklus berikutnya
+        if not stop_event.is_set():
+            log.info(f"=== SIKLUS {cycle_count} SELESAI ===")
+            log.info(f"Ringkasan: {successful_wallets} wallet berhasil, {failed_wallets} wallet gagal")
+            log.info("Semua wallet telah diproses. Menunggu 24 jam untuk siklus berikutnya...")
+            for i in range(86400):  # 24 jam
+                if stop_event.is_set():
+                    break
+                time.sleep(1)
 
 def run_faucet_for_all_keys(stop_event):
     """Versi parallel - memproses semua wallet bersamaan"""

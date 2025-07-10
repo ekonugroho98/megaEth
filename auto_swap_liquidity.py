@@ -203,136 +203,148 @@ def ensure_approve(w3_instance, account, pk, token_addr, amt):
     return True
 
 def do_swap(w3_instance, account, pk, src_sym, dst_sym, amt, mass_mode=False):
-    src = TOKENS.get(src_sym)
-    dst = TOKENS.get(dst_sym)
-    if not src or not dst:
-        error(f"Token {src_sym} atau {dst_sym} tidak ditemukan.")
-        return False
+    try:
+        src = TOKENS.get(src_sym)
+        dst = TOKENS.get(dst_sym)
+        if not src or not dst:
+            error(f"Token {src_sym} atau {dst_sym} tidak ditemukan.")
+            return False
 
-    deadline = int(time.time()) + 120
+        deadline = int(time.time()) + 120
 
-    src_addr = src['address'] if src['address'] else WETH_ADDR
-    dst_addr = dst['address'] if dst['address'] else WETH_ADDR
+        src_addr = src['address'] if src['address'] else WETH_ADDR
+        dst_addr = dst['address'] if dst['address'] else WETH_ADDR
 
-    if src_sym == 'ETH' and dst_sym == 'ETH':
-        error('Swap ETH ke ETH tidak didukung.')
-        return False
-    if dst['address'] is None and dst_sym != 'WETH':
-        error(f"Token tujuan {dst_sym} tidak memiliki address valid.")
-        return False
+        if src_sym == 'ETH' and dst_sym == 'ETH':
+            error('Swap ETH ke ETH tidak didukung.')
+            return False
+        if dst['address'] is None and dst_sym != 'WETH':
+            error(f"Token tujuan {dst_sym} tidak memiliki address valid.")
+            return False
 
-    if src_addr and dst_addr:
-        paths = [[src_addr, dst_addr]]
-    elif src_addr:
-        paths = [[src_addr, WETH_ADDR]]
-    else:
-        paths = [[WETH_ADDR, dst_addr]]
+        if src_addr and dst_addr:
+            paths = [[src_addr, dst_addr]]
+        elif src_addr:
+            paths = [[src_addr, WETH_ADDR]]
+        else:
+            paths = [[WETH_ADDR, dst_addr]]
 
-    amount_out = None
-    chosen_path = None
-    
-    router_contract = w3_instance.eth.contract(address=ROUTER_ADDR, abi=ROUTER_ABI)
-    
-    for p in paths:
-        if None in p:
-            continue
-        try:
-            amounts = router_contract.functions.getAmountsOut(amt, p).call()
-            amount_out, chosen_path = amounts[-1], p
-            break
-        except Exception as e:
+        amount_out = None
+        chosen_path = None
+        
+        router_contract = w3_instance.eth.contract(address=ROUTER_ADDR, abi=ROUTER_ABI)
+        
+        for p in paths:
+            if None in p:
+                continue
+            try:
+                amounts = router_contract.functions.getAmountsOut(amt, p).call()
+                amount_out, chosen_path = amounts[-1], p
+                break
+            except Exception as e:
+                if not mass_mode:
+                    error(f"Tidak dapat menemukan pool likuid untuk swap {src_sym} -> {dst_sym}.")
+                continue
+                
+        if amount_out is None:
             if not mass_mode:
                 error(f"Tidak dapat menemukan pool likuid untuk swap {src_sym} -> {dst_sym}.")
-            continue
+            return False
             
-    if amount_out is None:
-        if not mass_mode:
-            error(f"Tidak dapat menemukan pool likuid untuk swap {src_sym} -> {dst_sym}.")
-        return False
-        
-    min_out = int(amount_out * (1 - SLIPPAGE))
-    if not ensure_approve(w3_instance, account, pk, src['address'], amt):
-        return False
-        
-    nonce = w3_instance.eth.get_transaction_count(account)
+        min_out = int(amount_out * (1 - SLIPPAGE))
+        if not ensure_approve(w3_instance, account, pk, src['address'], amt):
+            return False
+            
+        nonce = w3_instance.eth.get_transaction_count(account)
 
-    tx_params = {'from': account, 'nonce': nonce, 'gas': GAS_SW, 'gasPrice': GAS_P}
-    if src_sym == "ETH":
-        fn = router_contract.functions.swapExactETHForTokens(min_out, chosen_path, account, deadline)
-        tx_params['value'] = amt
-    elif dst_sym == "ETH":
-        fn = router_contract.functions.swapExactTokensForETH(amt, min_out, chosen_path, account, deadline)
-    else:
-        fn = router_contract.functions.swapExactTokensForTokens(amt, min_out, chosen_path, account, deadline)
+        tx_params = {'from': account, 'nonce': nonce, 'gas': GAS_SW, 'gasPrice': GAS_P}
+        if src_sym == "ETH":
+            fn = router_contract.functions.swapExactETHForTokens(min_out, chosen_path, account, deadline)
+            tx_params['value'] = amt
+        elif dst_sym == "ETH":
+            fn = router_contract.functions.swapExactTokensForETH(amt, min_out, chosen_path, account, deadline)
+        else:
+            fn = router_contract.functions.swapExactTokensForTokens(amt, min_out, chosen_path, account, deadline)
 
-    tx = fn.build_transaction(tx_params)
-    if not chk_native(w3_instance, account, tx['gas'] * tx['gasPrice'] + tx.get('value', 0)):
-        return False
-    sig = w3_instance.eth.account.sign_transaction(tx, pk)
-    tx_hash = w3_instance.eth.send_raw_transaction(sig.raw_transaction)
-    rec = wait_for_tx(w3_instance, tx_hash, f"Mengirim swap {src_sym} -> {dst_sym}...")
-    if rec and rec.status == 1:
-        success(f"Swap {src_sym} -> {dst_sym} berhasil! 🎉 Tx Hash: [yellow]{tx_hash.hex()}[/yellow]")
-        return True
-    else:
-        error(f"Swap {src_sym} -> {dst_sym} gagal! ❌ Tx Hash: [yellow]{tx_hash.hex()}[/yellow]")
+        tx = fn.build_transaction(tx_params)
+        if not chk_native(w3_instance, account, tx['gas'] * tx['gasPrice'] + tx.get('value', 0)):
+            return False
+        sig = w3_instance.eth.account.sign_transaction(tx, pk)
+        tx_hash = w3_instance.eth.send_raw_transaction(sig.raw_transaction)
+        rec = wait_for_tx(w3_instance, tx_hash, f"Mengirim swap {src_sym} -> {dst_sym}...")
+        if rec and rec.status == 1:
+            success(f"Swap {src_sym} -> {dst_sym} berhasil! 🎉 Tx Hash: [yellow]{tx_hash.hex()}[/yellow]")
+            return True
+        else:
+            error(f"Swap {src_sym} -> {dst_sym} gagal! ❌ Tx Hash: [yellow]{tx_hash.hex()}[/yellow]")
+            return False
+    except Exception as e:
+        error(f"[do_swap] Error fatal: {e}")
+        import traceback
+        error(traceback.format_exc())
         return False
 
 def add_liquidity(w3_instance, account, pk, token_sym, eth_wei):
-    token_data = TOKENS[token_sym]
-    token_addr = token_data['address']
-    deadline = int(time.time()) + 120
-    
-    info(f"Mencoba menambah likuiditas untuk {w3_instance.from_wei(eth_wei, 'ether')} ETH dan {token_sym}...")
-    
-    router_contract = w3_instance.eth.contract(address=ROUTER_ADDR, abi=ROUTER_ABI)
-    
     try:
-        _, amounts = router_contract.functions.getAmountsOut(eth_wei, [WETH_ADDR, token_addr]).call()
-        token_wei = amounts
-    except Exception as e: 
-        error(f"Tidak dapat menghitung jumlah token. Mungkin pool belum ada. Error: {e}")
-        return False
-    
-    info(f"Dibutuhkan [bold]{w3_instance.from_wei(token_wei, 'ether')} {token_sym}[/bold] untuk dipasangkan dengan {w3_instance.from_wei(eth_wei, 'ether')} ETH.")
-    token_contract = w3_instance.eth.contract(address=token_addr, abi=ERC20_ABI)
-    token_balance = token_contract.functions.balanceOf(account).call()
-    
-    LIQUIDITY_SLIPPAGE = 0.01
-    token_min = int(token_wei * (1 - LIQUIDITY_SLIPPAGE))
-    eth_min = int(eth_wei * (1 - LIQUIDITY_SLIPPAGE))
-    
-    if token_balance < token_min:
-        error(f"Saldo {token_sym} tidak cukup. Butuh minimal: {w3_instance.from_wei(token_min, 'ether')}, Punya: {w3_instance.from_wei(token_balance, 'ether')}")
-        return False
-    else:
-        if token_balance < token_wei:
-            info(f"Saldo cukup dengan toleransi slippage 1%. Menggunakan jumlah yang tersedia.")
-            token_wei = token_balance
-    
-    if not ensure_approve(w3_instance, account, pk, token_addr, token_wei): 
-        return False
-    
-    fn = router_contract.functions.addLiquidityETH(token_addr, token_wei, token_min, eth_min, account, deadline)
-    tx_params = {
-        'from': account, 
-        'value': eth_wei, 
-        'nonce': w3_instance.eth.get_transaction_count(account), 
-        'gas': GAS_SW, 
-        'gasPrice': GAS_P
-    }
-    tx = fn.build_transaction(tx_params)
-    if not chk_native(w3_instance, account, tx['gas'] * tx['gasPrice'] + tx.get('value', 0)): 
-        return False
-    
-    sig = w3_instance.eth.account.sign_transaction(tx, pk)
-    tx_hash = w3_instance.eth.send_raw_transaction(sig.raw_transaction)
-    rec = wait_for_tx(w3_instance, tx_hash, "Menambah likuiditas...")
-    if rec and rec.status == 1: 
-        success(f"Likuiditas berhasil ditambah! Tx Hash: [yellow]{tx_hash.hex()}[/yellow]")
-        return True
-    else: 
-        error(f"Gagal menambah likuiditas. Tx Hash: [yellow]{tx_hash.hex()}[/yellow]")
+        token_data = TOKENS[token_sym]
+        token_addr = token_data['address']
+        deadline = int(time.time()) + 120
+        
+        info(f"Mencoba menambah likuiditas untuk {w3_instance.from_wei(eth_wei, 'ether')} ETH dan {token_sym}...")
+        
+        router_contract = w3_instance.eth.contract(address=ROUTER_ADDR, abi=ROUTER_ABI)
+        
+        try:
+            _, amounts = router_contract.functions.getAmountsOut(eth_wei, [WETH_ADDR, token_addr]).call()
+            token_wei = amounts
+        except Exception as e: 
+            error(f"Tidak dapat menghitung jumlah token. Mungkin pool belum ada. Error: {e}")
+            return False
+        
+        info(f"Dibutuhkan [bold]{w3_instance.from_wei(token_wei, 'ether')} {token_sym}[/bold] untuk dipasangkan dengan {w3_instance.from_wei(eth_wei, 'ether')} ETH.")
+        token_contract = w3_instance.eth.contract(address=token_addr, abi=ERC20_ABI)
+        token_balance = token_contract.functions.balanceOf(account).call()
+        
+        LIQUIDITY_SLIPPAGE = 0.01
+        token_min = int(token_wei * (1 - LIQUIDITY_SLIPPAGE))
+        eth_min = int(eth_wei * (1 - LIQUIDITY_SLIPPAGE))
+        
+        if token_balance < token_min:
+            error(f"Saldo {token_sym} tidak cukup. Butuh minimal: {w3_instance.from_wei(token_min, 'ether')}, Punya: {w3_instance.from_wei(token_balance, 'ether')}")
+            return False
+        else:
+            if token_balance < token_wei:
+                info(f"Saldo cukup dengan toleransi slippage 1%. Menggunakan jumlah yang tersedia.")
+                token_wei = token_balance
+        
+        if not ensure_approve(w3_instance, account, pk, token_addr, token_wei): 
+            return False
+        
+        fn = router_contract.functions.addLiquidityETH(token_addr, token_wei, token_min, eth_min, account, deadline)
+        tx_params = {
+            'from': account, 
+            'value': eth_wei, 
+            'nonce': w3_instance.eth.get_transaction_count(account), 
+            'gas': GAS_SW, 
+            'gasPrice': GAS_P
+        }
+        tx = fn.build_transaction(tx_params)
+        if not chk_native(w3_instance, account, tx['gas'] * tx['gasPrice'] + tx.get('value', 0)): 
+            return False
+        
+        sig = w3_instance.eth.account.sign_transaction(tx, pk)
+        tx_hash = w3_instance.eth.send_raw_transaction(sig.raw_transaction)
+        rec = wait_for_tx(w3_instance, tx_hash, "Menambah likuiditas...")
+        if rec and rec.status == 1: 
+            success(f"Likuiditas berhasil ditambah! Tx Hash: [yellow]{tx_hash.hex()}[/yellow]")
+            return True
+        else: 
+            error(f"Gagal menambah likuiditas. Tx Hash: [yellow]{tx_hash.hex()}[/yellow]")
+            return False
+    except Exception as e:
+        error(f"[add_liquidity] Error fatal: {e}")
+        import traceback
+        error(traceback.format_exc())
         return False
 
 def automated_swap_and_liquidity():
@@ -402,10 +414,16 @@ def automated_swap_and_liquidity():
         # Buat Web3 instance dengan proxy untuk wallet ini
         w3_wallet = create_web3_with_proxy(wallet_proxy)
         
-        # Cek saldo ETH
-        eth_balance = w3_wallet.eth.get_balance(wallet.address)
-        eth_balance_human = w3_wallet.from_wei(eth_balance, 'ether')
-        info(f"Saldo ETH: {eth_balance_human:.6f} ETH")
+        # Cek saldo ETH dengan error handling
+        try:
+            eth_balance = w3_wallet.eth.get_balance(wallet.address)
+            eth_balance_human = w3_wallet.from_wei(eth_balance, 'ether')
+            info(f"Saldo ETH: {eth_balance_human:.6f} ETH")
+        except Exception as e:
+            error(f"Gagal mengecek saldo ETH untuk wallet {wallet.address}: {e}")
+            warning(f"Melanjutkan ke wallet berikutnya...")
+            time.sleep(5)
+            continue
         
         # Cek apakah saldo cukup untuk operasi
         total_needed = w3_wallet.to_wei(random_swap_amount + random_liquidity_amount, 'ether') + (GAS_SW * GAS_P * 2)
@@ -422,13 +440,19 @@ def automated_swap_and_liquidity():
             info(f"Mencoba swap ETH -> {token_sym}...")
             amount_wei = w3_wallet.to_wei(random_swap_amount, 'ether')
             
-            if do_swap(w3_wallet, wallet.address, PK_LIST[accounts.index(wallet)], "ETH", token_sym, amount_wei, mass_mode=True):
-                swap_successful = True
-                successful_token = token_sym
-                break
-            else:
-                info(f"Swap ke {token_sym} gagal. Mencoba token berikutnya...")
+            try:
+                if do_swap(w3_wallet, wallet.address, PK_LIST[accounts.index(wallet)], "ETH", token_sym, amount_wei, mass_mode=True):
+                    swap_successful = True
+                    successful_token = token_sym
+                    break
+                else:
+                    info(f"Swap ke {token_sym} gagal. Mencoba token berikutnya...")
+                    time.sleep(2)
+            except Exception as e:
+                error(f"Error saat swap ke {token_sym}: {e}")
+                info(f"Mencoba token berikutnya...")
                 time.sleep(2)
+                continue
         
         if not swap_successful:
             error(f"Gagal melakukan swap untuk dompet {wallet.address}")
@@ -442,11 +466,15 @@ def automated_swap_and_liquidity():
         info(f"Menambah likuiditas untuk pasangan ETH / {successful_token}...")
         liquidity_eth_wei = w3_wallet.to_wei(random_liquidity_amount, 'ether')
         
-        if add_liquidity(w3_wallet, wallet.address, PK_LIST[accounts.index(wallet)], successful_token, liquidity_eth_wei):
-            success_count += 1
-            success(f"✅ Dompet {wallet.address} berhasil menyelesaikan semua operasi!")
-        else:
-            error(f"❌ Gagal menambah likuiditas untuk dompet {wallet.address}")
+        try:
+            if add_liquidity(w3_wallet, wallet.address, PK_LIST[accounts.index(wallet)], successful_token, liquidity_eth_wei):
+                success_count += 1
+                success(f"✅ Dompet {wallet.address} berhasil menyelesaikan semua operasi!")
+            else:
+                error(f"❌ Gagal menambah likuiditas untuk dompet {wallet.address}")
+        except Exception as e:
+            error(f"❌ Error saat menambah likuiditas untuk dompet {wallet.address}: {e}")
+            warning(f"Melanjutkan ke wallet berikutnya...")
         
         # Jeda antar dompet
         if i < total_wallets - 1:
